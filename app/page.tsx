@@ -37,6 +37,26 @@ function CheckoutModal({
   const [loading, setLoading] = useState(false);
   const [cambios, setCambios] = useState<Record<number, number>>({});
   const [hasExchanges, setHasExchanges] = useState(false);
+  const [customPrices, setCustomPrices] = useState<Record<number, number>>({});
+
+  // Cargar precios especiales/promocionales cuando se selecciona un cliente
+  useEffect(() => {
+    if (!selectedClient) {
+      setCustomPrices({});
+      return;
+    }
+    const headers = { Authorization: `Bearer ${token}` };
+    fetch(`${API_URL}/stock?idcliente=${selectedClient.id}`, { headers })
+      .then(res => res.json())
+      .then((data: Product[]) => {
+        const priceMap: Record<number, number> = {};
+        data.forEach(p => {
+          priceMap[p.id] = p.price;
+        });
+        setCustomPrices(priceMap);
+      })
+      .catch(err => console.error("Error al cargar precios especiales del cliente:", err));
+  }, [selectedClient, token]);
 
   // Si viene de un pedido, usar sus items; si no, usar el carrito
   const activeItems: SaleItem[] = useMemo(() => {
@@ -45,9 +65,10 @@ function CheckoutModal({
       .filter(([, qty]) => qty > 0)
       .map(([id, qty]) => {
         const prod = products.find(p => p.id === Number(id))!;
-        return { id: Number(id), quantity: qty, price: prod.price, name: prod.name };
+        const price = customPrices[prod.id] !== undefined ? customPrices[prod.id] : prod.price;
+        return { id: Number(id), quantity: qty, price: price, name: prod.name };
       });
-  }, [pedidoId, pedidoItems, cart, products]);
+  }, [pedidoId, pedidoItems, cart, products, customPrices]);
 
   const subtotal = useMemo(() => {
     return activeItems.reduce((s, item) => {
@@ -73,6 +94,7 @@ function CheckoutModal({
       setRecargo(0); setFormaDePago("efectivo"); setEsPedido(false); setFechaEntrega("");
       setCambios({});
       setHasExchanges(false);
+      setCustomPrices({});
       // Pre-cargar cliente del pedido si viene
       if (pedidoCliente) {
         const found = clients.find(c => c.id === pedidoCliente.id);
@@ -161,13 +183,31 @@ function CheckoutModal({
         {/* ── PASO 0: CLIENTE (solo venta nueva) ── */}
         {step === 0 && !isPedidoMode && (
           <div className="space-y-4">
-            <div className="rounded-2xl bg-white/5 border border-white/10 p-3 space-y-1">
-              {activeItems.map(item => (
-                <div key={item.id} className="flex justify-between text-sm">
-                  <span className="text-zinc-300">{item.quantity}x {item.name}</span>
-                  <span className="text-zinc-400">${(item.price * item.quantity).toFixed(2)}</span>
-                </div>
-              ))}
+            <div className="rounded-2xl bg-white/5 border border-white/10 p-3 space-y-2">
+              {activeItems.map(item => {
+                const origProd = products.find(p => p.id === item.id);
+                const hasPromo = origProd && origProd.price !== item.price;
+                return (
+                  <div key={item.id} className="flex justify-between text-sm items-center">
+                    <div className="flex flex-col">
+                      <span className="text-zinc-300 font-medium">{item.quantity}x {item.name}</span>
+                      {hasPromo && (
+                        <span className="text-[10px] text-emerald-400 font-semibold tracking-wide">¡Precio especial aplicado!</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {hasPromo && (
+                        <span className="text-xs text-zinc-500 line-through">
+                          ${(origProd.price * item.quantity).toFixed(2)}
+                        </span>
+                      )}
+                      <span className={hasPromo ? "text-emerald-400 font-bold" : "text-zinc-400"}>
+                        ${(item.price * item.quantity).toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
               <div className="border-t border-white/10 pt-2 flex justify-between font-bold">
                 <span>Subtotal</span>
                 <span className="text-orange-400">${subtotal.toFixed(2)}</span>
@@ -703,6 +743,18 @@ export default function BakeryDriverApp() {
   const [misVentas, setMisVentas] = useState<any[]>([]);
   const [loading, setLoading]     = useState(true);
 
+  // POS search and sorting state
+  const [posSearch, setPosSearch] = useState("");
+
+  const displayedProducts = useMemo(() => {
+    let list = products.filter(p => p.name.toLowerCase().includes(posSearch.toLowerCase()));
+    return [...list].sort((a, b) => {
+      const aHasStock = a.quantity > 0 ? 1 : 0;
+      const bHasStock = b.quantity > 0 ? 1 : 0;
+      return bHasStock - aHasStock;
+    });
+  }, [products, posSearch]);
+
   // Checkout state
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [pedidoCheckout, setPedidoCheckout] = useState<{ id: number; items: SaleItem[]; cliente: { id: number; name: string } | null } | null>(null);
@@ -888,9 +940,27 @@ export default function BakeryDriverApp() {
                   <span className="text-sm font-semibold text-orange-400">Reparto</span>
                 </div>
               </div>
+              {/* Buscador de productos en POS */}
+              <div className="relative">
+                <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                <input
+                  value={posSearch}
+                  onChange={e => setPosSearch(e.target.value)}
+                  placeholder="Buscar producto..."
+                  className="h-11 w-full rounded-2xl border border-white/10 bg-white/5 pl-11 pr-4 text-sm outline-none placeholder:text-zinc-500 focus:border-orange-500 text-white"
+                />
+                {posSearch && (
+                  <button onClick={() => setPosSearch("")} className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-zinc-400 hover:text-white">
+                    Limpiar
+                  </button>
+                )}
+              </div>
+
               {loading ? (
                 <div className="space-y-2">{[1,2,3,4].map(i => <div key={i} className="h-14 rounded-2xl bg-white/5 animate-pulse" />)}</div>
-              ) : products.map(product => {
+              ) : displayedProducts.length === 0 ? (
+                <p className="text-center text-zinc-500 text-sm mt-10">No se encontraron productos.</p>
+              ) : displayedProducts.map(product => {
                 const disabled = product.quantity === 0;
                 const qty = cart[product.id] || 0;
                 return (
