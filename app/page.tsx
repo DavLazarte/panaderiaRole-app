@@ -684,7 +684,8 @@ function CargarPagoModal({
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) {
-        const blob = await res.blob();
+        const rawBlob = await res.blob();
+        const blob = new Blob([rawBlob], { type: "application/pdf" });
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
