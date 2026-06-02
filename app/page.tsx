@@ -6,12 +6,29 @@ import {
   CircleDollarSign, ClipboardList, ChevronRight, LogOut,
   User as UserIcon, X, Check, Calendar, CheckCircle2,
   CreditCard, Banknote, Clock, Receipt, ArrowLeft,
-  ChevronDown, AlertCircle, RefreshCw,
+  ChevronDown, AlertCircle, RefreshCw, Trash2,
 } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://role.test/api";
 
-interface Product  { id: number; name: string; price: number; quantity: number; }
+const formatPaymentInput = (val: string) => {
+  let clean = val.replace(/[^0-9,]/g, "");
+  const parts = clean.split(",");
+  if (parts.length > 2) {
+    clean = parts[0] + "," + parts.slice(1).join("");
+  }
+  let integerPart = parts[0];
+  const decimalPart = parts[1] !== undefined ? "," + parts[1] : "";
+  integerPart = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return integerPart + decimalPart;
+};
+
+const parsePaymentInput = (formatted: string): number => {
+  const clean = formatted.replace(/\./g, "").replace(",", ".");
+  return Number(clean) || 0;
+};
+
+interface Product  { id: number; name: string; price: number; quantity: number; sold_qty?: number; }
 interface Client   { id: number; name: string; address: string; balance: number; }
 interface Delivery { id: number; customer: string; status: string; items: string; total: string; total_raw: number; address: string; advance?: number; }
 interface SaleItem { id: number; name: string; price: number; quantity: number; }
@@ -19,11 +36,12 @@ interface SaleItem { id: number; name: string; price: number; quantity: number; 
 // ─── CheckoutModal ────────────────────────────────────────────────────────────
 function CheckoutModal({
   open, onClose, cart, products, token, onSuccess, clients,
-  pedidoId, pedidoItems, pedidoCliente,
+  pedidoId, pedidoItems, pedidoCliente, isEditing,
 }: {
   open: boolean; onClose: () => void; cart: Record<number, number>;
   products: Product[]; token: string; onSuccess: () => void; clients: Client[];
   pedidoId?: number | null; pedidoItems?: SaleItem[]; pedidoCliente?: { id: number; name: string } | null;
+  isEditing?: boolean;
 }) {
   const [step, setStep] = useState(0);
   const [clientSearch, setClientSearch] = useState("");
@@ -32,7 +50,7 @@ function CheckoutModal({
   const [fechaEntrega, setFechaEntrega] = useState("");
   const [descuento, setDescuento] = useState(0);
   const [recargo, setRecargo] = useState(0);
-  const [pago, setPago] = useState(0);
+  const [pago, setPago] = useState("");
   const [formaDePago, setFormaDePago] = useState("efectivo");
   const [loading, setLoading] = useState(false);
   const [cambios, setCambios] = useState<Record<number, number>>({});
@@ -60,7 +78,7 @@ function CheckoutModal({
 
   // Si viene de un pedido, usar sus items; si no, usar el carrito
   const activeItems: SaleItem[] = useMemo(() => {
-    if (pedidoId && pedidoItems) return pedidoItems;
+    if (pedidoId && pedidoItems && !isEditing) return pedidoItems;
     return Object.entries(cart)
       .filter(([, qty]) => qty > 0)
       .map(([id, qty]) => {
@@ -68,7 +86,7 @@ function CheckoutModal({
         const price = customPrices[prod.id] !== undefined ? customPrices[prod.id] : prod.price;
         return { id: Number(id), quantity: qty, price: price, name: prod.name };
       });
-  }, [pedidoId, pedidoItems, cart, products, customPrices]);
+  }, [pedidoId, pedidoItems, cart, products, customPrices, isEditing]);
 
   const subtotal = useMemo(() => {
     return activeItems.reduce((s, item) => {
@@ -84,9 +102,13 @@ function CheckoutModal({
     return Math.round((subtotal - desc + rec) * 100) / 100;
   }, [subtotal, descuento, recargo]);
 
-  const saldo = useMemo(() => Math.max(0, Math.round((totalFinal - pago) * 100) / 100), [totalFinal, pago]);
+  const pagoNum = useMemo(() => parsePaymentInput(pago), [pago]);
 
-  useEffect(() => { setPago(totalFinal); }, [totalFinal]);
+  const saldo = useMemo(() => Math.max(0, Math.round((totalFinal - pagoNum) * 100) / 100), [totalFinal, pagoNum]);
+
+  const vuelto = useMemo(() => Math.max(0, Math.round((pagoNum - totalFinal) * 100) / 100), [totalFinal, pagoNum]);
+
+  useEffect(() => { setPago(formatPaymentInput(totalFinal.toString().replace(".", ","))); }, [totalFinal]);
 
   useEffect(() => {
     if (open) {
@@ -113,12 +135,22 @@ function CheckoutModal({
     setLoading(true);
     try {
       let res;
-      if (pedidoId) {
+      if (pedidoId && isEditing) {
+        // Editar items de un pedido existente usando POST para evitar bloqueos de servidores
+        res = await fetch(`${API_URL}/pedidos/${pedidoId}/editar`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            cart: activeItems.map(i => ({ id: i.id, quantity: i.quantity, price: i.price })),
+            total: totalFinal,
+          }),
+        });
+      } else if (pedidoId) {
         // Cobrar pedido existente
         res = await fetch(`${API_URL}/pedidos/${pedidoId}/cobrar`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ pago, forma_de_pago: formaDePago }),
+          body: JSON.stringify({ pago: pagoNum, forma_de_pago: formaDePago }),
         });
       } else {
         // Venta nueva
@@ -134,7 +166,7 @@ function CheckoutModal({
             total: totalFinal,
             idcliente: selectedClient?.id ?? null,
             tipo_venta: "venta_reparto",
-            descuento, recargo, pago,
+            descuento, recargo, pago: pagoNum,
             forma_de_pago: formaDePago,
             es_pedido: esPedido,
             fecha_entrega: esPedido ? fechaEntrega : null,
@@ -155,14 +187,19 @@ function CheckoutModal({
   if (!open) return null;
 
   const isPedidoMode = !!pedidoId;
-  const stepTitles = isPedidoMode ? ["Resumen Pedido", "Pago"] : ["Cliente", "Ajustes", "Pago"];
-  const totalSteps = isPedidoMode ? 2 : 3;
+  const isEditingMode = isPedidoMode && isEditing;
+  const stepTitles = isEditingMode
+    ? ["Confirmar Cambios"]
+    : isPedidoMode
+      ? ["Resumen Pedido", "Pago"]
+      : ["Cliente", "Ajustes", "Pago"];
+  const totalSteps = isEditingMode ? 1 : isPedidoMode ? 2 : 3;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center">
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-md rounded-t-3xl border-t border-white/10 bg-zinc-950 p-6 pb-10 shadow-2xl overflow-y-auto" style={{ maxHeight: "90vh" }}>
-        <div className="mx-auto mb-5 h-1 w-12 rounded-full bg-white/20" />
+      <div className="relative w-full max-w-md rounded-t-3xl md:rounded-3xl border-t md:border border-white/10 bg-zinc-950 p-6 pb-10 md:pb-6 shadow-2xl overflow-y-auto transition-all duration-300" style={{ maxHeight: "90vh" }}>
+        <div className="mx-auto mb-5 h-1 w-12 rounded-full bg-white/20 md:hidden" />
         <div className="flex items-center justify-between mb-4">
           <div>
             <p className="text-xs text-zinc-500 uppercase tracking-widest">
@@ -283,22 +320,47 @@ function CheckoutModal({
                 <span className="text-sm font-semibold">{pedidoCliente.name}</span>
               </div>
             )}
-            <div className="rounded-2xl bg-white/5 border border-white/10 p-3 space-y-1">
-              {activeItems.map(item => (
-                <div key={item.id} className="flex justify-between text-sm">
-                  <span className="text-zinc-300">{item.quantity}x {item.name}</span>
-                  <span className="text-zinc-400">${(item.price * item.quantity).toFixed(2)}</span>
-                </div>
-              ))}
+            <div className="rounded-2xl bg-white/5 border border-white/10 p-3 space-y-2">
+              {activeItems.map(item => {
+                const origProd = products.find(p => p.id === item.id);
+                const hasPromo = origProd && origProd.price !== item.price;
+                return (
+                  <div key={item.id} className="flex justify-between text-sm items-center">
+                    <div className="flex flex-col">
+                      <span className="text-zinc-300 font-medium">{item.quantity}x {item.name}</span>
+                      {hasPromo && (
+                        <span className="text-[10px] text-emerald-400 font-semibold tracking-wide">¡Precio especial aplicado!</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {hasPromo && (
+                        <span className="text-xs text-zinc-500 line-through">
+                          ${(origProd.price * item.quantity).toFixed(2)}
+                        </span>
+                      )}
+                      <span className={hasPromo ? "text-emerald-400 font-bold" : "text-zinc-400"}>
+                        ${(item.price * item.quantity).toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
               <div className="border-t border-white/10 pt-2 flex justify-between font-bold">
                 <span>Total del Pedido</span>
                 <span className="text-orange-400">${subtotal.toFixed(2)}</span>
               </div>
             </div>
-            <button onClick={() => setStep(1)}
-              className="w-full bg-orange-500 text-white py-4 rounded-2xl font-bold shadow-lg shadow-orange-500/20 active:scale-95 flex items-center justify-center gap-2">
-              Ir al Pago <ChevronRight className="h-5 w-5" />
-            </button>
+            {isEditingMode ? (
+              <button onClick={handleConfirm} disabled={loading}
+                className="w-full bg-orange-500 text-white py-4 rounded-2xl font-bold shadow-lg shadow-orange-500/20 active:scale-95 flex items-center justify-center gap-2">
+                {loading ? "Guardando..." : <><Check className="h-5 w-5" /> Guardar Cambios</>}
+              </button>
+            ) : (
+              <button onClick={() => setStep(1)}
+                className="w-full bg-orange-500 text-white py-4 rounded-2xl font-bold shadow-lg shadow-orange-500/20 active:scale-95 flex items-center justify-center gap-2">
+                Ir al Pago <ChevronRight className="h-5 w-5" />
+              </button>
+            )}
           </div>
         )}
 
@@ -426,17 +488,37 @@ function CheckoutModal({
                   </label>
                   <div className="relative">
                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-orange-400 font-bold text-lg">$</span>
-                    <input type="number" min={0} step={0.01} value={pago}
-                      onChange={e => setPago(Math.max(0, Number(e.target.value)))}
+                    <input type="text" value={pago}
+                      onChange={e => setPago(formatPaymentInput(e.target.value))}
                       className="w-full h-14 rounded-2xl bg-white/5 border border-white/10 pl-10 pr-4 text-xl font-bold outline-none focus:border-orange-500 text-white" />
                   </div>
                 </div>
-                <div className={`rounded-2xl p-4 flex justify-between items-center transition-all ${saldo > 0 ? "bg-red-500/10 border border-red-500/30" : "bg-emerald-500/10 border border-emerald-500/30"}`}>
+                <div className={`rounded-2xl p-4 flex justify-between items-center transition-all ${
+                  saldo > 0 ? "bg-red-500/10 border border-red-500/30" :
+                  vuelto > 0 ? "bg-orange-500/10 border border-orange-500/30 animate-pulse" :
+                  "bg-emerald-500/10 border border-emerald-500/30"
+                }`}>
                   <div>
-                    <p className="text-xs text-zinc-400">{saldo > 0 ? "Queda en cuenta corriente" : "Saldo"}</p>
-                    <p className={`text-xl font-bold ${saldo > 0 ? "text-red-300" : "text-emerald-300"}`}>
-                      {saldo > 0 ? `-$${saldo.toFixed(2)}` : "Pagado ✓"}
-                    </p>
+                    {saldo > 0 ? (
+                      <>
+                        <p className="text-xs text-zinc-400">Queda en cuenta corriente</p>
+                        <p className="text-xl font-bold text-red-300">
+                          -${saldo.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                        </p>
+                      </>
+                    ) : vuelto > 0 ? (
+                      <>
+                        <p className="text-xs text-orange-300">Vuelto a entregar</p>
+                        <p className="text-xl font-bold text-orange-400">
+                          ${vuelto.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-xs text-zinc-400">Saldo</p>
+                        <p className="text-xl font-bold text-emerald-300">Pagado ✓</p>
+                      </>
+                    )}
                   </div>
                   <div className="text-right">
                     <p className="text-xs text-zinc-400">Total</p>
@@ -483,10 +565,10 @@ function ClienteDetalleModal({ client, token, onClose, onCargarPago }: { client:
   }, [client.id, token]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center">
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-md rounded-t-3xl border-t border-white/10 bg-zinc-950 p-6 pb-10 shadow-2xl overflow-y-auto" style={{ maxHeight: "85vh" }}>
-        <div className="mx-auto mb-5 h-1 w-12 rounded-full bg-white/20" />
+      <div className="relative w-full max-w-md rounded-t-3xl md:rounded-3xl border-t md:border border-white/10 bg-zinc-950 p-6 pb-10 md:pb-6 shadow-2xl overflow-y-auto transition-all duration-300" style={{ maxHeight: "85vh" }}>
+        <div className="mx-auto mb-5 h-1 w-12 rounded-full bg-white/20 md:hidden" />
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-xl font-bold">{client.name}</h2>
@@ -556,6 +638,7 @@ function CargarPagoModal({
   const [ventas, setVentas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingSubmit, setLoadingSubmit] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   useEffect(() => {
     fetch(`${API_URL}/clientes/${client.id}/ventas?only_debt=true`, { headers: { Authorization: `Bearer ${token}` } })
@@ -567,7 +650,7 @@ function CargarPagoModal({
   }, [client.id, token]);
 
   const distribution = useMemo(() => {
-    const amountNum = Number(monto) || 0;
+    const amountNum = parsePaymentInput(monto);
     let remaining = amountNum;
     return ventas.map(v => {
       const allocated = Math.min(v.saldo, remaining);
@@ -585,12 +668,44 @@ function CargarPagoModal({
   }, [ventas]);
 
   const newTotalBalance = useMemo(() => {
-    const amountNum = Number(monto) || 0;
+    const amountNum = parsePaymentInput(monto);
     return Math.max(0, Math.round((totalSaldos - amountNum) * 100) / 100);
   }, [totalSaldos, monto]);
 
+  const vuelto = useMemo(() => {
+    const amountNum = parsePaymentInput(monto);
+    return Math.max(0, Math.round((amountNum - totalSaldos) * 100) / 100);
+  }, [totalSaldos, monto]);
+
+  const handleDownloadPdf = async () => {
+    setPdfLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/clientes/${client.id}/resumen-pdf`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `resumen_cuenta_${client.name.replace(/\s+/g, "_")}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      } else {
+        const err = await res.json();
+        alert(err.message || "Error al generar el PDF");
+      }
+    } catch {
+      alert("Error al descargar el resumen de cuenta");
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
   const handleConfirm = async () => {
-    const amountNum = Number(monto) || 0;
+    const amountNum = parsePaymentInput(monto);
     if (amountNum <= 0) {
       alert("Por favor ingrese un monto válido.");
       return;
@@ -616,10 +731,10 @@ function CargarPagoModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center">
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-md rounded-t-3xl border-t border-white/10 bg-zinc-950 p-6 pb-10 shadow-2xl overflow-y-auto" style={{ maxHeight: "85vh" }}>
-        <div className="mx-auto mb-5 h-1 w-12 rounded-full bg-white/20" />
+      <div className="relative w-full max-w-md rounded-t-3xl md:rounded-3xl border-t md:border border-white/10 bg-zinc-950 p-6 pb-10 md:pb-6 shadow-2xl overflow-y-auto transition-all duration-300" style={{ maxHeight: "85vh" }}>
+        <div className="mx-auto mb-5 h-1 w-12 rounded-full bg-white/20 md:hidden" />
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-xl font-bold">Cargar Pago</h2>
@@ -644,12 +759,10 @@ function CargarPagoModal({
               <div className="relative">
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-orange-400 font-bold text-lg">$</span>
                 <input
-                  type="number"
-                  min={0}
-                  step={0.01}
+                  type="text"
                   value={monto}
-                  onChange={e => setMonto(e.target.value)}
-                  placeholder="Ej: 2000"
+                  onChange={e => setMonto(formatPaymentInput(e.target.value))}
+                  placeholder="Ej: 2.000"
                   className="w-full h-12 rounded-xl bg-white/5 border border-white/10 pl-9 pr-4 font-bold outline-none focus:border-orange-500 text-white"
                 />
               </div>
@@ -666,6 +779,22 @@ function CargarPagoModal({
               />
             </div>
 
+            <button
+              type="button"
+              onClick={handleDownloadPdf}
+              disabled={pdfLoading || totalSaldos === 0}
+              className="w-full flex items-center justify-center gap-2 rounded-xl bg-orange-500/10 border border-orange-500/20 hover:bg-orange-500/20 active:scale-95 text-orange-400 py-3 text-sm font-semibold transition-all disabled:opacity-40"
+            >
+              {pdfLoading ? (
+                <span>Generando PDF...</span>
+              ) : (
+                <>
+                  <ClipboardList className="h-4 w-4" />
+                  <span>Ver Resumen de Cuenta (PDF)</span>
+                </>
+              )}
+            </button>
+
             {/* Resumen Deuda */}
             <div className="rounded-2xl p-4 bg-white/5 border border-white/10 grid grid-cols-2 gap-4">
               <div>
@@ -679,6 +808,13 @@ function CargarPagoModal({
                 </p>
               </div>
             </div>
+
+            {vuelto > 0 && (
+              <div className="rounded-2xl p-4 bg-orange-500/10 border border-orange-500/30 text-center animate-pulse">
+                <p className="text-xs text-orange-300 font-semibold uppercase tracking-wider">Pago excede la deuda</p>
+                <p className="text-xl font-bold text-orange-400 mt-1">Vuelto a entregar: ${vuelto.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</p>
+              </div>
+            )}
 
             {/* Vista Previa de Distribución */}
             {ventas.length > 0 ? (
@@ -751,7 +887,10 @@ export default function BakeryDriverApp() {
     return [...list].sort((a, b) => {
       const aHasStock = a.quantity > 0 ? 1 : 0;
       const bHasStock = b.quantity > 0 ? 1 : 0;
-      return bHasStock - aHasStock;
+      if (aHasStock !== bHasStock) {
+        return bHasStock - aHasStock;
+      }
+      return (b.sold_qty || 0) - (a.sold_qty || 0);
     });
   }, [products, posSearch]);
 
@@ -764,6 +903,9 @@ export default function BakeryDriverApp() {
 
   // Cargar pago state
   const [paymentClient, setPaymentClient] = useState<Client | null>(null);
+
+  // Pedido que se está editando
+  const [editingPedido, setEditingPedido] = useState<{ id: number; cliente: { id: number; name: string } | null } | null>(null);
 
   useEffect(() => {
     const savedToken = localStorage.getItem("token");
@@ -828,6 +970,17 @@ export default function BakeryDriverApp() {
     });
   };
 
+  const handleSetQuantity = (product: Product, value: string) => {
+    if (value === "") {
+      setCart(prev => ({ ...prev, [product.id]: 0 }));
+      return;
+    }
+    const parsed = parseInt(value, 10);
+    if (isNaN(parsed)) return;
+    const clamped = Math.max(0, Math.min(product.quantity, parsed));
+    setCart(prev => ({ ...prev, [product.id]: clamped }));
+  };
+
   const cartTotal = useMemo(() =>
     products.reduce((s, p) => s + p.price * (cart[p.id] || 0), 0).toFixed(2), [cart, products]);
   const cartCount = useMemo(() => Object.values(cart).reduce((s, q) => s + q, 0), [cart]);
@@ -850,6 +1003,60 @@ export default function BakeryDriverApp() {
         setCheckoutOpen(true);
       }
     } catch { alert("Error al cargar pedido"); }
+  };
+
+  // Cargar pedido para edición en el POS
+  const handleEditarPedido = async (delivery: Delivery) => {
+    try {
+      const res = await fetch(`${API_URL}/pedidos/${delivery.id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const pedido = await res.json();
+
+        // Mapear items al carrito
+        const cartMap: Record<number, number> = {};
+        pedido.items.forEach((item: SaleItem) => {
+          cartMap[item.id] = item.quantity;
+        });
+        setCart(cartMap);
+
+        // Activar modo edición
+        setEditingPedido({
+          id: pedido.id,
+          cliente: pedido.customer !== "Consumidor Final"
+            ? { id: pedido.idcliente, name: pedido.customer }
+            : null,
+        });
+
+        // Redirigir al POS
+        setActiveTab("pos");
+      }
+    } catch {
+      alert("Error al cargar pedido para edición");
+    }
+  };
+
+  // Cancelar/Eliminar pedido
+  const handleCancelarPedido = async (delivery: Delivery) => {
+    if (!confirm(`¿Estás seguro de que deseas eliminar el pedido de ${delivery.customer}?`)) {
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/pedidos/${delivery.id}/cancelar`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        alert("Pedido eliminado correctamente");
+        fetchAllData(token!);
+      } else {
+        const err = await res.json();
+        alert(err.message || "Error al eliminar el pedido");
+      }
+    } catch {
+      alert("Error de conexión");
+    }
   };
 
   const filteredClients    = clients.filter(c => c.name.toLowerCase().includes(search.toLowerCase()));
@@ -909,7 +1116,7 @@ export default function BakeryDriverApp() {
   // ── APP ──
   return (
     <div className="min-h-screen bg-gradient-to-br from-zinc-950 via-zinc-900 to-orange-950 text-white">
-      <div className="mx-auto flex min-h-screen max-w-md flex-col overflow-hidden relative">
+      <div className="mx-auto flex min-h-screen max-w-md md:max-w-5xl flex-col overflow-hidden relative transition-all duration-300">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(251,146,60,0.18),transparent_40%)]" />
 
         {/* Header */}
@@ -933,6 +1140,22 @@ export default function BakeryDriverApp() {
           {/* ── POS ── */}
           {activeTab === "pos" && (
             <div className="space-y-4">
+              {editingPedido && (
+                <div className="rounded-2xl border border-orange-500/30 bg-orange-500/10 p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Clock className="h-5 w-5 text-orange-400 shrink-0" />
+                    <div>
+                      <p className="text-xs text-orange-400 font-bold uppercase tracking-wider">Modo Edición</p>
+                      <p className="text-sm font-semibold text-white">Pedido #{editingPedido.id}</p>
+                      <p className="text-xs text-zinc-400">{editingPedido.cliente?.name ?? 'Consumidor Final'}</p>
+                    </div>
+                  </div>
+                  <button onClick={() => { setCart({}); setEditingPedido(null); }}
+                    className="bg-white/5 border border-white/10 hover:bg-white/10 text-xs font-semibold px-3 py-2 rounded-xl text-zinc-300 transition-all active:scale-95">
+                    Cancelar
+                  </button>
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <h1 className="text-2xl font-bold">Venta Rápida</h1>
                 <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
@@ -960,33 +1183,49 @@ export default function BakeryDriverApp() {
                 <div className="space-y-2">{[1,2,3,4].map(i => <div key={i} className="h-14 rounded-2xl bg-white/5 animate-pulse" />)}</div>
               ) : displayedProducts.length === 0 ? (
                 <p className="text-center text-zinc-500 text-sm mt-10">No se encontraron productos.</p>
-              ) : displayedProducts.map(product => {
-                const disabled = product.quantity === 0;
-                const qty = cart[product.id] || 0;
-                return (
-                  <div key={product.id}
-                    className={`flex items-center gap-3 rounded-2xl border px-3 py-2.5 transition-all ${
-                      disabled ? "border-zinc-800 bg-zinc-900/40 opacity-40" :
-                      qty > 0 ? "border-orange-500/40 bg-orange-500/5" : "border-white/10 bg-white/5"
-                    }`}>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold truncate">{product.name}</p>
-                      <p className="text-xs text-zinc-400">${product.price} · {product.quantity} disp.</p>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button disabled={disabled} onClick={() => updateQuantity(product, -1)}
-                        className="h-8 w-8 flex items-center justify-center rounded-lg border border-white/10 bg-zinc-900/60 active:scale-95 disabled:opacity-40">
-                        <Minus className="h-3.5 w-3.5" />
-                      </button>
-                      <span className="w-7 text-center text-sm font-bold">{qty}</span>
-                      <button disabled={disabled} onClick={() => updateQuantity(product, 1)}
-                        className="h-8 w-8 flex items-center justify-center rounded-lg bg-orange-500 text-white shadow-sm shadow-orange-500/30 active:scale-95 disabled:opacity-40">
-                        <Plus className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  {displayedProducts.map(product => {
+                    const disabled = product.quantity === 0;
+                    const qty = cart[product.id] || 0;
+                    return (
+                      <div key={product.id}
+                        className={`flex items-center gap-3 rounded-2xl border px-3 py-2.5 transition-all ${
+                          disabled ? "border-zinc-800 bg-zinc-900/40 opacity-40" :
+                          qty > 0 ? "border-orange-500/40 bg-orange-500/5" : "border-white/10 bg-white/5"
+                        }`}>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold truncate">{product.name}</p>
+                          <p className="text-xs text-zinc-400">${product.price} · {product.quantity} disp.</p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button disabled={disabled} onClick={() => updateQuantity(product, -1)}
+                            className="h-8 w-8 flex items-center justify-center rounded-lg border border-white/10 bg-zinc-900/60 active:scale-95 disabled:opacity-40">
+                            <Minus className="h-3.5 w-3.5" />
+                          </button>
+                          <input
+                            type="number"
+                            min={0}
+                            max={product.quantity}
+                            value={qty === 0 ? "" : qty}
+                            onChange={e => handleSetQuantity(product, e.target.value)}
+                            onBlur={() => {
+                              if (qty === 0) setCart(prev => ({ ...prev, [product.id]: 0 }));
+                            }}
+                            onWheel={e => (e.target as HTMLElement).blur()}
+                            className="w-12 h-8 text-center text-sm font-bold bg-white/5 border border-white/10 rounded-lg outline-none focus:border-orange-500 focus:bg-orange-500/10 text-white"
+                            style={{ appearance: "textfield", WebkitAppearance: "none", MozAppearance: "textfield" }}
+                          />
+                          <button disabled={disabled} onClick={() => updateQuantity(product, 1)}
+                            className="h-8 w-8 flex items-center justify-center rounded-lg bg-orange-500 text-white shadow-sm shadow-orange-500/30 active:scale-95 disabled:opacity-40">
+                            <Plus className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -1002,31 +1241,44 @@ export default function BakeryDriverApp() {
                   </button>
                 ))}
               </div>
-              <div className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {filteredDeliveries.map(delivery => (
-                  <div key={delivery.id} className="rounded-3xl border border-white/10 bg-white/5 p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <h3 className="text-base font-semibold">{delivery.customer}</h3>
-                        <p className="text-xs text-zinc-400">{delivery.address}</p>
+                  <div key={delivery.id} className="rounded-3xl border border-white/10 bg-white/5 p-4 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <h3 className="text-base font-semibold">{delivery.customer}</h3>
+                          <p className="text-xs text-zinc-400">{delivery.address}</p>
+                        </div>
+                        <StatusBadge status={delivery.status} />
                       </div>
-                      <StatusBadge status={delivery.status} />
+                      <div className="mt-2 rounded-xl bg-black/20 px-3 py-2 text-xs text-zinc-300">{delivery.items}</div>
                     </div>
-                    <div className="mt-2 rounded-xl bg-black/20 px-3 py-2 text-xs text-zinc-300">{delivery.items}</div>
                     <div className="mt-3 flex items-center justify-between">
                       <div>
                         <p className="text-xs text-zinc-500">Total</p>
                         <p className="text-lg font-bold">{delivery.total}</p>
                       </div>
-                      <button onClick={() => handleEntregarPedido(delivery)}
-                        className="flex items-center gap-1 rounded-xl bg-orange-500 px-4 py-2.5 text-sm font-semibold shadow-lg shadow-orange-500/20 active:scale-95">
-                        Cobrar y Entregar <ChevronRight className="h-4 w-4" />
-                      </button>
+                      <div className="flex gap-2">
+                        <button onClick={() => handleCancelarPedido(delivery)}
+                          className="flex items-center justify-center rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2.5 hover:bg-red-500/20 active:scale-95 text-red-400"
+                          title="Eliminar pedido">
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                        <button onClick={() => handleEditarPedido(delivery)}
+                          className="flex items-center gap-1 rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm font-semibold hover:bg-white/10 active:scale-95 text-zinc-300">
+                          Editar
+                        </button>
+                        <button onClick={() => handleEntregarPedido(delivery)}
+                          className="flex items-center gap-1 rounded-xl bg-orange-500 px-4 py-2.5 text-sm font-semibold shadow-lg shadow-orange-500/20 active:scale-95">
+                          Cobrar <ChevronRight className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
-                {filteredDeliveries.length === 0 && <p className="text-center text-zinc-500 mt-10 text-sm">No hay pedidos pendientes.</p>}
               </div>
+              {filteredDeliveries.length === 0 && <p className="text-center text-zinc-500 mt-10 text-sm">No hay pedidos pendientes.</p>}
             </div>
           )}
 
@@ -1034,7 +1286,7 @@ export default function BakeryDriverApp() {
           {activeTab === "stock" && (
             <div className="space-y-4">
               <h1 className="text-2xl font-bold">Mi Stock</h1>
-              <div className="space-y-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                 {products.map(item => (
                   <div key={item.id} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
                     <div>
@@ -1059,15 +1311,18 @@ export default function BakeryDriverApp() {
                 <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar clientes..."
                   className="h-12 w-full rounded-2xl border border-white/10 bg-white/5 pl-11 pr-4 text-sm outline-none placeholder:text-zinc-500 focus:border-orange-500" />
               </div>
-              <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                 {filteredClients.map(client => (
                   <button key={client.id} onClick={() => setClienteDetalle(client)}
-                    className="w-full rounded-3xl border border-white/10 bg-white/5 p-4 text-left active:scale-[0.99] transition-all">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <h3 className="text-base font-semibold">{client.name}</h3>
-                        <p className="text-xs text-zinc-400 mt-0.5">{client.address}</p>
+                    className="w-full rounded-3xl border border-white/10 bg-white/5 p-4 text-left active:scale-[0.99] transition-all flex flex-col justify-between h-full">
+                    <div className="flex items-start justify-between gap-3 w-full">
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-base font-semibold truncate">{client.name}</h3>
+                        <p className="text-xs text-zinc-400 mt-0.5 truncate">{client.address}</p>
                       </div>
+                    </div>
+                    <div className="flex items-center justify-between mt-4 w-full">
+                      <span className="text-xs text-zinc-500">Saldo</span>
                       <div className="flex items-center gap-2">
                         <div className={`rounded-xl px-3 py-1.5 text-sm font-bold ${client.balance > 0 ? "bg-red-500/20 text-red-300" : "bg-emerald-500/20 text-emerald-300"}`}>
                           {client.balance > 0 ? `-$${client.balance.toLocaleString('es-AR')}` : "OK"}
@@ -1099,24 +1354,35 @@ export default function BakeryDriverApp() {
               {misVentas.length === 0 ? (
                 <p className="text-center text-zinc-500 text-sm mt-10">Sin ventas registradas hoy.</p>
               ) : (
-                <div className="space-y-3">
-                  {misVentas.map(v => (
-                    <div key={v.id} className="rounded-2xl border border-white/10 bg-white/5 p-3 flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-semibold">{v.customer}</p>
-                        <p className="text-xs text-zinc-400">
-                          {v.hora} · {v.tipo === "pedido" ? "Pedido Entregado" : "Venta Directa"} · {v.forma_pago}
-                        </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {misVentas.map(v => {
+                    const isCobro = v.tipo === "cobro_cuenta";
+                    return (
+                      <div key={`${v.tipo}-${v.id}`} className="rounded-2xl border border-white/10 bg-white/5 p-3 flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-semibold">{v.customer}</p>
+                          <p className="text-xs text-zinc-400">
+                            {isCobro 
+                              ? `${v.hora} · Cobro de Cuenta · Efectivo` 
+                              : `${v.hora} · ${v.tipo === "pedido" ? "Pedido Entregado" : "Venta Directa"} · ${v.forma_pago}`
+                            }
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className={`text-sm font-bold ${isCobro ? "text-emerald-400" : "text-white"}`}>
+                            {isCobro ? "+" : ""}${v.total > 0 ? v.total.toLocaleString('es-AR') : v.pago.toLocaleString('es-AR')}
+                          </p>
+                          {isCobro ? (
+                            <p className="text-xs text-emerald-500 font-semibold">Cobrado</p>
+                          ) : (
+                            v.saldo > 0
+                              ? <p className="text-xs text-red-400">Debe ${v.saldo.toLocaleString('es-AR')}</p>
+                              : <p className="text-xs text-emerald-400">Pagado</p>
+                          )}
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <p className="text-sm font-bold">${v.total.toLocaleString('es-AR')}</p>
-                        {v.saldo > 0
-                          ? <p className="text-xs text-red-400">Debe ${v.saldo.toLocaleString('es-AR')}</p>
-                          : <p className="text-xs text-emerald-400">Pagado</p>
-                        }
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1126,7 +1392,7 @@ export default function BakeryDriverApp() {
 
         {/* ── Bottom Bar POS ── */}
         {activeTab === "pos" && (
-          <div className={`fixed bottom-24 left-1/2 z-20 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 rounded-3xl border border-white/10 bg-black/60 p-4 backdrop-blur-2xl transition-all duration-300 ${
+          <div className={`fixed bottom-24 left-1/2 z-20 w-[calc(100%-2rem)] max-w-md md:max-w-5xl -translate-x-1/2 rounded-3xl border border-white/10 bg-black/60 p-4 backdrop-blur-2xl transition-all duration-300 ${
             Number(cartTotal) > 0 ? "scale-100 opacity-100 shadow-2xl shadow-orange-500/20" : "scale-95 opacity-80"
           }`}>
             <div className="flex items-center justify-between gap-4">
@@ -1134,19 +1400,32 @@ export default function BakeryDriverApp() {
                 <p className="text-xs uppercase tracking-widest text-zinc-500">Total · {cartCount} items</p>
                 <h3 className="text-2xl font-bold">${cartTotal}</h3>
               </div>
-              <button onClick={() => { if (Number(cartTotal) > 0) { setPedidoCheckout(null); setCheckoutOpen(true); } }}
+              <button onClick={() => {
+                if (Number(cartTotal) > 0) {
+                  if (editingPedido) {
+                    setPedidoCheckout({
+                      id: editingPedido.id,
+                      items: [],
+                      cliente: editingPedido.cliente,
+                    });
+                  } else {
+                    setPedidoCheckout(null);
+                  }
+                  setCheckoutOpen(true);
+                }
+              }}
                 disabled={Number(cartTotal) === 0}
                 className={`rounded-2xl px-6 py-3.5 text-sm font-bold transition-all duration-300 ${
                   Number(cartTotal) > 0 ? "bg-orange-500 text-white shadow-xl shadow-orange-500/30 active:scale-95" : "bg-zinc-800 text-zinc-500"
                 }`}>
-                Cobrar
+                {editingPedido ? "Guardar" : "Cobrar"}
               </button>
             </div>
           </div>
         )}
 
         {/* ── NAV ── */}
-        <nav className="fixed bottom-0 left-1/2 z-30 flex h-24 w-full max-w-md -translate-x-1/2 items-center justify-around border-t border-white/10 bg-black/70 px-2 backdrop-blur-3xl">
+        <nav className="fixed bottom-0 left-1/2 z-30 flex h-24 w-full max-w-md md:max-w-5xl -translate-x-1/2 items-center justify-around border-t border-white/10 bg-black/70 px-2 backdrop-blur-3xl">
           <NavButton icon={Truck}        label="Pedidos" value="pedidos" badge={deliveries.filter(d => d.status === "Late").length} />
           <NavButton icon={Package}      label="Stock"   value="stock" />
           <NavButton icon={ShoppingCart} label="Venta"   value="pos" prominent />
@@ -1166,8 +1445,10 @@ export default function BakeryDriverApp() {
         pedidoId={pedidoCheckout?.id ?? null}
         pedidoItems={pedidoCheckout?.items}
         pedidoCliente={pedidoCheckout?.cliente ?? null}
+        isEditing={!!editingPedido}
         onSuccess={() => {
           setCart({});
+          setEditingPedido(null);
           fetchAllData(token!);
         }}
       />
