@@ -31,7 +31,7 @@ const parsePaymentInput = (formatted: string): number => {
 
 interface Product  { id: number; name: string; price: number; quantity: number; sold_qty?: number; stock_local?: number; stock_vehiculo1?: number; stock_vehiculo2?: number; descripcion?: string; codigo?: string; estado?: string; idcategoria?: number; precio_unitario?: number; precio_reparto?: number; precio_bar?: number; disponible_reparto?: number; precios_especiales?: any[]; }
 interface Client   { id: number; name: string; address: string; balance: number; }
-interface Delivery { id: number; customer: string; status: string; items: string; raw_items?: {name: string, qty: number}[]; total: string; total_raw: number; address: string; advance?: number; fecha_entrega?: string | null; }
+interface Delivery { id: number; customer: string; status: string; items: string; raw_items?: {id?: number, name: string, qty: number}[]; total: string; total_raw: number; address: string; advance?: number; fecha_entrega?: string | null; }
 interface SaleItem { id: number; name: string; price: number; quantity: number; }
 interface Categoria { id_categoria: number; nombre: string; }
 
