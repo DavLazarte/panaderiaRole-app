@@ -1183,9 +1183,22 @@ export default function BakeryDriverApp() {
   const [loadingAdminStock, setLoadingAdminStock] = useState(false);
   const [adminStockRefresh, setAdminStockRefresh] = useState(0);
 
+  const [historyFilterType, setHistoryFilterType] = useState<'day' | 'range' | 'month'>('day');
   const [historyDate, setHistoryDate] = useState(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
+  const [historyStartDate, setHistoryStartDate] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
+  const [historyEndDate, setHistoryEndDate] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
+  const [historyMonthYear, setHistoryMonthYear] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
   const [historyTab, setHistoryTab] = useState<'movimientos' | 'estadisticas'>('movimientos');
   const [productStats, setProductStats] = useState<any[]>([]);
@@ -1197,8 +1210,11 @@ export default function BakeryDriverApp() {
   const [historySearch, setHistorySearch] = useState("");
   const [historyType, setHistoryType] = useState("todas");
   const [historyTotalPages, setHistoryTotalPages] = useState(1);
-  const [historyTotalVentas, setHistoryTotalVentas] = useState(0);
-  const [historyTotalCobrado, setHistoryTotalCobrado] = useState(0);
+  const [historyTotalEfectivo, setHistoryTotalEfectivo] = useState(0);
+  const [historyTotalTransferencia, setHistoryTotalTransferencia] = useState(0);
+  const [historyTotalSaldo, setHistoryTotalSaldo] = useState(0);
+  const [historyTotalFacturado, setHistoryTotalFacturado] = useState(0);
+  const [historyCajas, setHistoryCajas] = useState<any[]>([]);
 
   useEffect(() => {
     if (!token || !user) return;
@@ -1206,17 +1222,30 @@ export default function BakeryDriverApp() {
       setLoadingHistory(true);
       try {
         const headers = { Authorization: `Bearer ${token}` };
-        const res = await fetch(`${API_URL}/mis-ventas?date=${historyDate}&page=${historyPage}&search=${historySearch}&tipo=${historyType}`, { headers });
+        let queryParams = `filter_type=${historyFilterType}&page=${historyPage}&search=${historySearch}&tipo=${historyType}`;
+        if (historyFilterType === 'range') {
+          queryParams += `&start_date=${historyStartDate}&end_date=${historyEndDate}`;
+        } else if (historyFilterType === 'month') {
+          const [year, month] = historyMonthYear.split("-");
+          queryParams += `&month=${month}&year=${year}`;
+        } else {
+          queryParams += `&date=${historyDate}`;
+        }
+
+        const res = await fetch(`${API_URL}/mis-ventas?${queryParams}`, { headers });
         if (res.ok) {
           const data = await res.json();
           setMisVentas(data.paginator.data);
           setHistoryTotalPages(data.paginator.last_page || 1);
-          setHistoryTotalVentas(data.total_ventas);
-          setHistoryTotalCobrado(data.total_cobrado);
+          setHistoryTotalEfectivo(data.total_efectivo || 0);
+          setHistoryTotalTransferencia(data.total_transferencia || 0);
+          setHistoryTotalSaldo(data.total_saldo || 0);
+          setHistoryTotalFacturado(data.total_facturado || 0);
+          setHistoryCajas(data.cajas || []);
         }
 
         if (user.roles?.some((r: string) => r.toLowerCase() === 'admin')) {
-          const statsRes = await fetch(`${API_URL}/admin/estadisticas/productos?date=${historyDate}`, { headers });
+          const statsRes = await fetch(`${API_URL}/admin/estadisticas/productos?${queryParams}`, { headers });
           if (statsRes.ok) setProductStats(await statsRes.json());
         }
       } catch (e) {}
@@ -1227,7 +1256,7 @@ export default function BakeryDriverApp() {
       fetchHistory();
     }, 400);
     return () => clearTimeout(delayDebounceFn);
-  }, [token, user, historyDate, historyRefresh, historyPage, historySearch, historyType]);
+  }, [token, user, historyFilterType, historyDate, historyStartDate, historyEndDate, historyMonthYear, historyRefresh, historyPage, historySearch, historyType]);
 
   useEffect(() => {
     if (!token || !user?.roles?.some((r: string) => r.toLowerCase() === 'admin')) return;
@@ -1366,6 +1395,7 @@ export default function BakeryDriverApp() {
   const cartCount = useMemo(() => Object.values(cart).reduce((s, q) => s + q, 0), [cart]);
 
   const isAdmin = user?.roles?.some((r: string) => r.toLowerCase() === 'admin');
+  const isVendedor = user?.roles?.some((r: string) => r.toLowerCase() === 'vendedor');
 
 
 
@@ -1446,9 +1476,6 @@ export default function BakeryDriverApp() {
   const filteredClients    = clients.filter(c => c.name.toLowerCase().includes(search.toLowerCase()));
   const filteredDeliveries = deliveries.filter(d => deliveryFilter === "All" ? true : d.status === deliveryFilter);
 
-  const totalVentasHoy = historyTotalVentas;
-  const totalCobradoHoy = historyTotalCobrado;
-
   const NavButton = ({ icon: Icon, label, value, prominent, badge }: any) => (
     <button onClick={() => setActiveTab(value)}
       className={`flex flex-col items-center justify-center gap-1 transition-all duration-300 relative ${activeTab === value ? "text-brand-red" : "text-zinc-400"}`}>
@@ -1521,9 +1548,13 @@ export default function BakeryDriverApp() {
               <Truck className="w-5 h-5"/> <span className="font-semibold text-sm">Pedidos</span>
               {deliveries.filter(d => d.status === "Late").length > 0 && <span className="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">{deliveries.filter(d => d.status === "Late").length}</span>}
             </button>
-            <button onClick={() => setActiveTab('stock')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'stock' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Package className="w-5 h-5"/> <span className="font-semibold text-sm">Stock</span></button>
+            {!isVendedor && (
+              <button onClick={() => setActiveTab('stock')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'stock' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Package className="w-5 h-5"/> <span className="font-semibold text-sm">Stock</span></button>
+            )}
             <button onClick={() => setActiveTab('pos')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'pos' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><ShoppingCart className="w-5 h-5"/> <span className="font-semibold text-sm">Venta Rápida</span></button>
-            <button onClick={() => setActiveTab('clientes')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'clientes' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Users className="w-5 h-5"/> <span className="font-semibold text-sm">Clientes</span></button>
+            {!isVendedor && (
+              <button onClick={() => setActiveTab('clientes')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'clientes' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Users className="w-5 h-5"/> <span className="font-semibold text-sm">Clientes</span></button>
+            )}
             <button onClick={() => setActiveTab('ventas')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'ventas' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Receipt className="w-5 h-5"/> <span className="font-semibold text-sm">Historial</span></button>
           </nav>
           <div className="p-4 border-t border-white/10">
@@ -1866,7 +1897,7 @@ export default function BakeryDriverApp() {
           )}
 
           {/* ── CLIENTES ── */}
-          {activeTab === "clientes" && (
+          {activeTab === "clientes" && !isVendedor && (
             <div className="space-y-4">
               <h1 className="text-2xl font-bold">Clientes</h1>
               <div className="relative">
@@ -1902,16 +1933,74 @@ export default function BakeryDriverApp() {
           {/* ── MIS VENTAS ── */}
           {activeTab === "ventas" && (
             <div className="space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <h1 className="text-2xl font-bold">Historial {isAdmin ? "(Admin)" : ""}</h1>
-                <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 focus-within:border-brand-red transition-colors">
-                  <Calendar className="w-4 h-4 text-brand-yellow" />
-                  <input
-                    type="date"
-                    value={historyDate}
-                    onChange={(e) => { setHistoryDate(e.target.value); setHistoryPage(1); }}
-                    className="bg-transparent text-sm font-semibold outline-none text-white w-full [&::-webkit-calendar-picker-indicator]:invert"
-                  />
+              <div className="flex flex-col gap-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <h1 className="text-2xl font-bold">Historial {isAdmin ? "(Admin)" : ""}</h1>
+                  
+                  {/* Selector de tipo de filtro */}
+                  <div className="flex bg-black/20 p-1 rounded-xl border border-white/5 self-start sm:self-auto">
+                    {(['day', 'range', 'month'] as const).map((t) => (
+                      <button
+                        key={t}
+                        onClick={() => { setHistoryFilterType(t); setHistoryPage(1); }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                          historyFilterType === t ? 'bg-brand-red text-white' : 'text-zinc-400 hover:text-zinc-200'
+                        }`}
+                      >
+                        {t === 'day' ? 'Día' : t === 'range' ? 'Período' : 'Mes'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Controles de fecha según el tipo de filtro */}
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                  {historyFilterType === 'day' && (
+                    <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2 focus-within:border-brand-red transition-colors w-full sm:w-60">
+                      <Calendar className="w-4 h-4 text-brand-yellow shrink-0" />
+                      <input
+                        type="date"
+                        value={historyDate}
+                        onChange={(e) => { setHistoryDate(e.target.value); setHistoryPage(1); }}
+                        className="bg-transparent text-sm font-semibold outline-none text-white w-full [&::-webkit-calendar-picker-indicator]:invert"
+                      />
+                    </div>
+                  )}
+
+                  {historyFilterType === 'range' && (
+                    <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+                      <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2 focus-within:border-brand-red transition-colors w-full sm:w-48">
+                        <span className="text-xs text-zinc-500 font-semibold shrink-0">Desde:</span>
+                        <input
+                          type="date"
+                          value={historyStartDate}
+                          onChange={(e) => { setHistoryStartDate(e.target.value); setHistoryPage(1); }}
+                          className="bg-transparent text-sm font-semibold outline-none text-white w-full [&::-webkit-calendar-picker-indicator]:invert"
+                        />
+                      </div>
+                      <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2 focus-within:border-brand-red transition-colors w-full sm:w-48">
+                        <span className="text-xs text-zinc-500 font-semibold shrink-0">Hasta:</span>
+                        <input
+                          type="date"
+                          value={historyEndDate}
+                          onChange={(e) => { setHistoryEndDate(e.target.value); setHistoryPage(1); }}
+                          className="bg-transparent text-sm font-semibold outline-none text-white w-full [&::-webkit-calendar-picker-indicator]:invert"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {historyFilterType === 'month' && (
+                    <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2 focus-within:border-brand-red transition-colors w-full sm:w-60">
+                      <Calendar className="w-4 h-4 text-brand-yellow shrink-0" />
+                      <input
+                        type="month"
+                        value={historyMonthYear}
+                        onChange={(e) => { setHistoryMonthYear(e.target.value); setHistoryPage(1); }}
+                        className="bg-transparent text-sm font-semibold outline-none text-white w-full [&::-webkit-calendar-picker-indicator]:invert"
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1953,15 +2042,52 @@ export default function BakeryDriverApp() {
                 </div>
               ) : historyTab === 'movimientos' || !isAdmin ? (
                 <>
-                  {/* Resumen del día */}
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
-                      <p className="text-xs text-zinc-400">Facturado</p>
-                      <p className="text-xl font-bold text-brand-yellow">${totalVentasHoy.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                  {isAdmin && historyCajas.length > 0 && (
+                    <div className="mb-6 space-y-3">
+                      <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider">Cajas por Usuario</h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {historyCajas.map((caja: any) => (
+                          <div key={caja.user_id} className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-2">
+                            <p className="font-bold text-white mb-2 pb-2 border-b border-white/10">📦 {caja.user_name}</p>
+                            <div className="flex justify-between items-center text-sm">
+                              <span className="text-zinc-400">💵 Efectivo a Rendir</span>
+                              <span className="font-bold text-emerald-400">${caja.total_efectivo.toLocaleString('es-AR')}</span>
+                            </div>
+                            <div className="flex justify-between items-center text-sm">
+                              <span className="text-zinc-400">🏦 Transferencias</span>
+                              <span className="font-bold text-blue-400">${caja.total_transferencia.toLocaleString('es-AR')}</span>
+                            </div>
+                            <div className="flex justify-between items-center text-sm">
+                              <span className="text-zinc-400">📝 Pendiente (Fiado)</span>
+                              <span className="font-bold text-red-400">${caja.total_saldo.toLocaleString('es-AR')}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
-                      <p className="text-xs text-zinc-400">Cobrado</p>
-                      <p className="text-xl font-bold text-emerald-400">${totalCobradoHoy.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                  )}
+
+                  {/* Resumen General */}
+                  <div className="mb-6">
+                    <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-3">
+                      {isAdmin ? 'Totales Generales' : 'Tu Caja'}
+                    </h3>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="rounded-2xl bg-emerald-500/10 border border-emerald-500/20 p-4 col-span-2">
+                        <p className="text-sm text-emerald-400/80 mb-1">💵 Efectivo en Mano (A Rendir)</p>
+                        <p className="text-3xl font-bold text-emerald-400">${historyTotalEfectivo.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                      </div>
+                      <div className="rounded-2xl bg-blue-500/10 border border-blue-500/20 p-3">
+                        <p className="text-xs text-blue-400/80">🏦 Transferencias</p>
+                        <p className="text-lg font-bold text-blue-400">${historyTotalTransferencia.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                      </div>
+                      <div className="rounded-2xl bg-red-500/10 border border-red-500/20 p-3">
+                        <p className="text-xs text-red-400/80">📝 Fiado / Cuenta Corriente</p>
+                        <p className="text-lg font-bold text-red-400">${historyTotalSaldo.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                      </div>
+                      <div className="col-span-2 flex justify-end">
+                        <p className="text-xs text-zinc-500">Total Facturado (Referencia): ${historyTotalFacturado.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                      </div>
                     </div>
                   </div>
                   {misVentas.length === 0 ? (
@@ -2031,6 +2157,7 @@ export default function BakeryDriverApp() {
                               itemStyle={{color: '#f97316'}}
                             />
                             <Bar dataKey="total_cantidad" name="Cantidad Vendida" fill="#f97316" radius={[4, 4, 0, 0]} />
+                            <Bar dataKey="total_cambios" name="Cambios / Roturas" fill="#ef4444" radius={[4, 4, 0, 0]} />
                           </BarChart>
                         </ResponsiveContainer>
                       </div>
@@ -2040,7 +2167,12 @@ export default function BakeryDriverApp() {
                           <div key={stat.name} className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between">
                             <div>
                               <p className="text-sm font-bold truncate text-white max-w-[150px]">{stat.name}</p>
-                              <p className="text-xs text-zinc-400">{stat.total_cantidad} unidades</p>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className="text-xs font-semibold text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded-md">{stat.total_cantidad} vendidas</span>
+                                {Number(stat.total_cambios) > 0 && (
+                                  <span className="text-xs font-semibold text-red-400 bg-red-400/10 px-2 py-0.5 rounded-md">{stat.total_cambios} cambios</span>
+                                )}
+                              </div>
                             </div>
                             <div className="text-right">
                               <p className="text-sm font-bold text-brand-yellow">${Number(stat.total_monto).toLocaleString('es-AR', {minimumFractionDigits: 2})}</p>
@@ -2094,9 +2226,9 @@ export default function BakeryDriverApp() {
         {/* ── NAV ── */}
         <nav className="md:hidden fixed bottom-0 left-1/2 z-30 flex h-24 w-full max-w-md -translate-x-1/2 items-center justify-around border-t border-white/10 bg-black/70 px-2 backdrop-blur-3xl">
           <NavButton icon={Truck}        label="Pedidos" value="pedidos" badge={deliveries.filter(d => d.status === "Late").length} />
-          <NavButton icon={Package}      label="Stock"   value="stock" />
+          {!isVendedor && <NavButton icon={Package} label="Stock" value="stock" />}
           <NavButton icon={ShoppingCart} label="Venta"   value="pos" prominent />
-          <NavButton icon={Users}        label="Clientes" value="clientes" />
+          {!isVendedor && <NavButton icon={Users}        label="Clientes" value="clientes" />}
           <NavButton icon={Receipt}      label="Historial" value="ventas" />
         </nav>
       </div>
