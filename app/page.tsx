@@ -2103,7 +2103,7 @@ export default function BakeryDriverApp() {
                               <p className="text-xs text-zinc-400">
                                 {isCobro 
                                   ? `${v.hora} · Cobro de Cuenta · Efectivo` 
-                                  : `${v.hora} · ${v.tipo === "pedido" ? "Pedido Entregado" : "Venta Directa"} · ${v.forma_pago}`
+                                  : `${v.hora} · ${v.tipo === "pedido" ? "Pedido Entregado" : "Venta Directa"} · ${v.saldo > 0 && v.pago === 0 ? "Cuenta Corriente" : v.saldo > 0 ? `${v.forma_pago} + Saldo` : v.forma_pago}`
                                 }
                               </p>
                             </div>

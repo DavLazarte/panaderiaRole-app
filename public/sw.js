@@ -1,4 +1,4 @@
-const CACHE_NAME = 'role-repartos-v6';
+const CACHE_NAME = 'role-repartos-v7';
 const ASSETS = [
   '/',
   '/logo.svg',
