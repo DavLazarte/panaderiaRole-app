@@ -1,16 +1,59 @@
 "use client";
 
-import React, { useMemo, useState, useEffect, useCallback } from "react";
+import React, { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import {
   ShoppingCart, Truck, Package, Users, Plus, Minus, Search,
   CircleDollarSign, ClipboardList, ChevronRight, LogOut,
   User as UserIcon, X, Check, Calendar, CheckCircle2,
   CreditCard, Banknote, Clock, Receipt, ArrowLeft,
-  ChevronDown, AlertCircle, RefreshCw, Trash2, PieChart as PieChartIcon, BarChart3
+  ChevronDown, AlertCircle, RefreshCw, Trash2, PieChart as PieChartIcon, BarChart3, Edit2, Download
 } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 
+import { DndContext, closestCenter, KeyboardSensor, TouchSensor, MouseSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, rectSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://role.test/api";
+
+function SortableProductItem({ product, disabled, qty, onUpdateQuantity, onSetQuantity, isReordering }: any) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: product.id });
+  const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 10 : 1 };
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners}
+      className={`flex items-center gap-3 rounded-2xl border px-3 py-2.5 transition-all cursor-grab active:cursor-grabbing ${
+        disabled ? "border-zinc-800 bg-zinc-900/40 opacity-40" :
+        qty > 0 ? "border-brand-red/40 bg-brand-red/5" : "border-white/10 bg-white/5"
+      } ${isDragging ? "shadow-2xl opacity-80" : ""}`}>
+      <div className="flex-1 min-w-0 pointer-events-none">
+        <p className="text-sm font-semibold truncate">{product.name}</p>
+        <p className="text-xs text-zinc-400">${product.price} · {product.quantity} disp.</p>
+      </div>
+      <div className="flex items-center gap-2 shrink-0 pointer-events-auto" onPointerDown={e => { if(!isReordering) e.stopPropagation(); }}>
+        {isReordering ? (
+          <div className="h-8 flex items-center px-3 rounded-lg border border-white/10 bg-white/10 text-white/50 text-xs font-bold uppercase tracking-wider pointer-events-none">
+            Mover
+          </div>
+        ) : (
+          <>
+            <button onClick={() => onUpdateQuantity(product, -1)} disabled={qty === 0}
+              className="h-8 w-8 rounded-full border border-white/10 bg-white/5 flex items-center justify-center hover:bg-white/10 disabled:opacity-30">
+              <Minus className="h-4 w-4" />
+            </button>
+            <input type="number" min="0" max={product.quantity} value={qty || ""} placeholder="0"
+              onChange={(e) => onSetQuantity(product, e.target.value)}
+              className="w-10 bg-transparent text-center text-sm font-bold outline-none" />
+            <button onClick={() => onUpdateQuantity(product, 1)} disabled={disabled || qty >= product.quantity}
+              className="h-8 w-8 rounded-full bg-brand-red text-white flex items-center justify-center shadow-lg hover:bg-red-600 disabled:opacity-30 disabled:bg-white/10 disabled:text-white/30">
+              <Plus className="h-4 w-4" />
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 const formatPaymentInput = (val: string) => {
   let clean = val.replace(/[^0-9,]/g, "");
@@ -55,6 +98,8 @@ function CheckoutModal({
   const [pago, setPago] = useState("");
   const [formaDePago, setFormaDePago] = useState("efectivo");
   const [loading, setLoading] = useState(false);
+  const [completedVentaId, setCompletedVentaId] = useState<number | null>(null);
+  const [loadingPdf, setLoadingPdf] = useState(false);
   const [cambios, setCambios] = useState<Record<number, number>>({});
   const [hasExchanges, setHasExchanges] = useState(false);
   const [customPrices, setCustomPrices] = useState<Record<number, number>>({});
@@ -84,9 +129,12 @@ function CheckoutModal({
     return Object.entries(cart)
       .filter(([, qty]) => qty > 0)
       .map(([id, qty]) => {
-        const prod = products.find(p => p.id === Number(id))!;
-        const price = customPrices[prod.id] !== undefined ? customPrices[prod.id] : prod.price;
-        return { id: Number(id), quantity: qty, price: price, name: prod.name };
+        const prod = products.find(p => p.id === Number(id));
+        const pedItem = pedidoItems?.find(pi => pi.id === Number(id));
+        const name = prod?.name || pedItem?.name || "Desconocido";
+        const basePrice = prod ? prod.price : (pedItem ? pedItem.price : 0);
+        const price = prod && customPrices[prod.id] !== undefined ? customPrices[prod.id] : basePrice;
+        return { id: Number(id), quantity: qty, price: price, name: name };
       });
   }, [pedidoId, pedidoItems, cart, products, customPrices, isEditing]);
 
@@ -119,6 +167,7 @@ function CheckoutModal({
       setCambios({});
       setHasExchanges(false);
       setCustomPrices({});
+      setCompletedVentaId(null);
       // Pre-cargar cliente del pedido si viene
       if (pedidoCliente) {
         const found = clients.find(c => c.id === pedidoCliente.id);
@@ -177,8 +226,14 @@ function CheckoutModal({
         });
       }
 
-      if (res.ok) { onSuccess(); onClose(); }
-      else {
+      let parsedRes: any = {};
+      if (res.ok) {
+        try { parsedRes = await res.json(); } catch(e){}
+        const vId = parsedRes.venta_id || pedidoId;
+        
+        // Mostramos el modal de descarga para todas las ventas registradas por la caja/reparto
+        setCompletedVentaId(vId);
+      } else {
         const err = await res.json();
         alert(err.message || "Error al registrar");
       }
@@ -186,7 +241,65 @@ function CheckoutModal({
     finally { setLoading(false); }
   };
 
+  const handleDownloadPdf = async () => {
+    if (!completedVentaId) return;
+    setLoadingPdf(true);
+    try {
+      const res = await fetch(`${API_URL}/pedidos/${completedVentaId}/comprobante`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `Comprobante_${completedVentaId}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      } else {
+        alert("Error al descargar PDF");
+      }
+    } catch {
+      alert("Error de conexión al descargar PDF");
+    } finally {
+      setLoadingPdf(false);
+    }
+  };
+
   if (!open) return null;
+
+  if (completedVentaId) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+        <div className="relative w-full max-w-sm rounded-3xl border border-white/10 bg-zinc-950 p-6 shadow-2xl flex flex-col items-center text-center">
+          <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mb-4">
+            <Check className="w-8 h-8 text-emerald-500" />
+          </div>
+          <h2 className="text-xl font-bold text-white mb-2">¡Venta Exitosa!</h2>
+          <p className="text-sm text-zinc-400 mb-6">El pedido de reparto fue registrado correctamente.</p>
+          <div className="flex flex-col gap-3 w-full">
+            <button 
+              onClick={handleDownloadPdf}
+              disabled={loadingPdf}
+              className="w-full bg-brand-red text-white font-bold py-3.5 rounded-xl hover:bg-red-600 transition-colors flex items-center justify-center gap-2"
+            >
+              {loadingPdf ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
+              {loadingPdf ? "Descargando..." : "Descargar Comprobante"}
+            </button>
+            <button 
+              onClick={() => { setCompletedVentaId(null); onSuccess(); onClose(); }}
+              className="w-full bg-white/5 text-zinc-300 font-bold py-3.5 rounded-xl hover:bg-white/10 transition-colors"
+            >
+              Cerrar
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const isPedidoMode = !!pedidoId;
   const isEditingMode = isPedidoMode && isEditing;
@@ -1176,6 +1289,61 @@ export default function BakeryDriverApp() {
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
+  const [isReordering, setIsReordering] = useState(false);
+  const [savingOrder, setSavingOrder] = useState(false);
+
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 100, tolerance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    // DnD operates on displayedProducts, but we need to update the full products array
+    const activeId = Number(active.id);
+    const overId = Number(over.id);
+    const oldIndexInProducts = products.findIndex(i => i.id === activeId);
+    const overIndexInProducts = products.findIndex(i => i.id === overId);
+
+    const newProducts = arrayMove([...products], oldIndexInProducts, overIndexInProducts);
+    setProducts(newProducts);
+
+    // Auto-save immediately after drop
+    try {
+      const articulosData = newProducts.map((p, index) => ({ id: p.id, orden: index }));
+      await fetch(`${API_URL}/articulos/orden`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ articulos: articulosData })
+      });
+    } catch {
+      // silent fail, order is still updated locally
+    }
+  };
+
+  const handleSaveOrder = async () => {
+    setSavingOrder(true);
+    try {
+      const articulosData = products.map((p, index) => ({ id: p.id, orden: index }));
+      const res = await fetch(`${API_URL}/articulos/orden`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ articulos: articulosData })
+      });
+      if (res.ok) {
+        setIsReordering(false);
+      } else {
+        alert("Error al guardar el orden");
+      }
+    } catch {
+      alert("Error de red");
+    } finally {
+      setSavingOrder(false);
+    }
+  };
   const [adminStock, setAdminStock] = useState<Product[]>([]);
   const [adminStockPage, setAdminStockPage] = useState(1);
   const [adminStockTotalPages, setAdminStockTotalPages] = useState(1);
@@ -1202,6 +1370,7 @@ export default function BakeryDriverApp() {
   });
   const [historyTab, setHistoryTab] = useState<'movimientos' | 'estadisticas'>('movimientos');
   const [productStats, setProductStats] = useState<any[]>([]);
+  const [clientStats, setClientStats] = useState<{ top_clientes: any[], cambios: any[] } | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [historyRefresh, setHistoryRefresh] = useState(0);
   const [totalsModalOpen, setTotalsModalOpen] = useState(false);
@@ -1215,6 +1384,20 @@ export default function BakeryDriverApp() {
   const [historyTotalSaldo, setHistoryTotalSaldo] = useState(0);
   const [historyTotalFacturado, setHistoryTotalFacturado] = useState(0);
   const [historyCajas, setHistoryCajas] = useState<any[]>([]);
+  const [historyActiveFilter, setHistoryActiveFilter] = useState<{ type: 'caja' | 'payment', value: any } | null>(null);
+
+  const filteredMisVentas = misVentas.filter(v => {
+    if (!historyActiveFilter) return true;
+    if (historyActiveFilter.type === 'caja') {
+      return v.user_id === historyActiveFilter.value;
+    }
+    if (historyActiveFilter.type === 'payment') {
+      if (historyActiveFilter.value === 'efectivo') return v.forma_pago === 'efectivo';
+      if (historyActiveFilter.value === 'transferencia') return v.forma_pago === 'transferencia';
+      if (historyActiveFilter.value === 'saldo') return v.tipo !== 'cobro_cuenta' && v.saldo > 0;
+    }
+    return true;
+  });
 
   useEffect(() => {
     if (!token || !user) return;
@@ -1247,6 +1430,9 @@ export default function BakeryDriverApp() {
         if (user.roles?.some((r: string) => r.toLowerCase() === 'admin')) {
           const statsRes = await fetch(`${API_URL}/admin/estadisticas/productos?${queryParams}`, { headers });
           if (statsRes.ok) setProductStats(await statsRes.json());
+          
+          const clientStatsRes = await fetch(`${API_URL}/admin/estadisticas/clientes?${queryParams}`, { headers });
+          if (clientStatsRes.ok) setClientStats(await clientStatsRes.json());
         }
       } catch (e) {}
       setLoadingHistory(false);
@@ -1258,6 +1444,18 @@ export default function BakeryDriverApp() {
     return () => clearTimeout(delayDebounceFn);
   }, [token, user, historyFilterType, historyDate, historyStartDate, historyEndDate, historyMonthYear, historyRefresh, historyPage, historySearch, historyType]);
 
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const lastStockElementRef = useCallback((node: any) => {
+    if (loadingAdminStock) return;
+    if (observerRef.current) observerRef.current.disconnect();
+    observerRef.current = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && adminStockPage < adminStockTotalPages) {
+        setAdminStockPage(prev => prev + 1);
+      }
+    });
+    if (node) observerRef.current.observe(node);
+  }, [loadingAdminStock, adminStockPage, adminStockTotalPages]);
+
   useEffect(() => {
     if (!token || !user?.roles?.some((r: string) => r.toLowerCase() === 'admin')) return;
     const fetchAdminStock = async () => {
@@ -1268,7 +1466,14 @@ export default function BakeryDriverApp() {
         });
         if (res.ok) {
           const data = await res.json();
-          setAdminStock(data.data);
+          if (adminStockPage === 1) {
+            setAdminStock(data.data);
+          } else {
+            setAdminStock(prev => {
+              const newItems = data.data.filter((d: any) => !prev.some(p => p.id === d.id));
+              return [...prev, ...newItems];
+            });
+          }
           setAdminStockTotalPages(data.last_page || 1);
         }
       } catch (e) {}
@@ -1284,14 +1489,16 @@ export default function BakeryDriverApp() {
   const [posSearch, setPosSearch] = useState("");
 
   const displayedProducts = useMemo(() => {
-    let list = products.filter(p => p.name.toLowerCase().includes(posSearch.toLowerCase()));
-    return [...list].sort((a, b) => {
+    if (posSearch) {
+      // When searching, filter but keep the user-defined order from products array
+      return products.filter(p => p.name.toLowerCase().includes(posSearch.toLowerCase()));
+    }
+    // No search: show all products in their saved order (products array already sorted by backend 'orden')
+    // Only sort by stock within that: in-stock first, but within each group keep user order
+    return [...products].sort((a, b) => {
       const aHasStock = a.quantity > 0 ? 1 : 0;
       const bHasStock = b.quantity > 0 ? 1 : 0;
-      if (aHasStock !== bHasStock) {
-        return bHasStock - aHasStock;
-      }
-      return (b.sold_qty || 0) - (a.sold_qty || 0);
+      return bHasStock - aHasStock; // in-stock first, ties keep original order (stable sort)
     });
   }, [products, posSearch]);
 
@@ -1301,6 +1508,102 @@ export default function BakeryDriverApp() {
 
   // Cliente detalle
   const [clienteDetalle, setClienteDetalle] = useState<Client | null>(null);
+
+  // Admin Personas (CRUD)
+  const [adminClientesTab, setAdminClientesTab] = useState<'saldos' | 'gestion'>('saldos');
+  const [adminPersonas, setAdminPersonas] = useState<any[]>([]);
+  const [adminPersonasPage, setAdminPersonasPage] = useState(1);
+  const [adminPersonasTotalPages, setAdminPersonasTotalPages] = useState(1);
+  const [adminPersonasSearch, setAdminPersonasSearch] = useState("");
+  const [loadingAdminPersonas, setLoadingAdminPersonas] = useState(false);
+  const [adminPersonasRefresh, setAdminPersonasRefresh] = useState(0);
+  
+  const [adminUsers, setAdminUsers] = useState<any[]>([]);
+  
+  const [editingPersona, setEditingPersona] = useState<any | null>(null);
+  const [personaForm, setPersonaForm] = useState({
+    nombre: "", tipo_persona: "cliente", direccion: "", telefono: "", mail: "", user_id: ""
+  });
+  const [savingPersona, setSavingPersona] = useState(false);
+
+  const observerPersonaRef = useRef<IntersectionObserver | null>(null);
+  const lastPersonaElementRef = useCallback((node: any) => {
+    if (loadingAdminPersonas) return;
+    if (observerPersonaRef.current) observerPersonaRef.current.disconnect();
+    observerPersonaRef.current = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && adminPersonasPage < adminPersonasTotalPages) {
+        setAdminPersonasPage(prev => prev + 1);
+      }
+    });
+    if (node) observerPersonaRef.current.observe(node);
+  }, [loadingAdminPersonas, adminPersonasPage, adminPersonasTotalPages]);
+
+  useEffect(() => {
+    if (!token || !user?.roles?.some((r: string) => r.toLowerCase() === 'admin')) return;
+    const fetchAdminPersonas = async () => {
+      if (adminPersonasPage === 1) setLoadingAdminPersonas(true);
+      try {
+        const res = await fetch(`${API_URL}/admin/personas?page=${adminPersonasPage}&search=${adminPersonasSearch}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (adminPersonasPage === 1) {
+            setAdminPersonas(data.data);
+          } else {
+            setAdminPersonas(prev => {
+              const newItems = data.data.filter((d: any) => !prev.some(p => p.idpersona === d.idpersona));
+              return [...prev, ...newItems];
+            });
+          }
+          setAdminPersonasTotalPages(data.last_page || 1);
+        }
+      } catch (e) {}
+      setLoadingAdminPersonas(false);
+    };
+    const delayDebounceFn = setTimeout(() => {
+      fetchAdminPersonas();
+    }, 400);
+    return () => clearTimeout(delayDebounceFn);
+  }, [token, user, adminPersonasPage, adminPersonasSearch, adminPersonasRefresh]);
+
+  const handleSavePersona = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token) return;
+    setSavingPersona(true);
+    try {
+      const url = editingPersona?.idpersona ? `${API_URL}/admin/personas/${editingPersona.idpersona}` : `${API_URL}/admin/personas`;
+      const method = editingPersona?.idpersona ? "PUT" : "POST";
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(personaForm)
+      });
+      if (res.ok) {
+        setEditingPersona(null);
+        setAdminPersonasPage(1);
+        setAdminPersonasRefresh(prev => prev + 1);
+        if (personaForm.tipo_persona === 'cliente') {
+           const cliRes = await fetch(`${API_URL}/clientes`, { headers: { Authorization: `Bearer ${token}` } });
+           if (cliRes.ok) setClients(await cliRes.json());
+        }
+      }
+    } catch(e) {}
+    setSavingPersona(false);
+  };
+
+  const handleDeletePersona = async (id: number) => {
+    if (!confirm("¿Eliminar este registro?")) return;
+    if (!token) return;
+    try {
+      await fetch(`${API_URL}/admin/personas/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setAdminPersonasPage(1);
+      setAdminPersonasRefresh(prev => prev + 1);
+    } catch(e) {}
+  };
 
   // Cargar pago state
   const [paymentClient, setPaymentClient] = useState<Client | null>(null);
@@ -1341,6 +1644,8 @@ export default function BakeryDriverApp() {
         if (u.roles?.some((r: string) => r.toLowerCase() === 'admin')) {
           const catRes = await fetch(`${API_URL}/categorias`, { headers });
           if (catRes.ok) setCategorias(await catRes.json());
+          const mayRes = await fetch(`${API_URL}/admin/users/mayoristas`, { headers });
+          if (mayRes.ok) setAdminUsers(await mayRes.json());
         }
       }
       setHistoryRefresh(prev => prev + 1);
@@ -1459,7 +1764,7 @@ export default function BakeryDriverApp() {
     try {
       const res = await fetch(`${API_URL}/pedidos/${delivery.id}/cancelar`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }
       });
       if (res.ok) {
         alert("Pedido eliminado correctamente");
@@ -1602,9 +1907,20 @@ export default function BakeryDriverApp() {
               )}
               <div className="flex items-center justify-between">
                 <h1 className="text-2xl font-bold">Venta Rápida</h1>
-                <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
-                  <CircleDollarSign className="h-4 w-4 text-brand-yellow" />
-                  <span className="text-sm font-semibold text-brand-yellow">Reparto</span>
+                <div className="flex items-center gap-3">
+                  {isReordering ? (
+                    <button onClick={handleSaveOrder} disabled={savingOrder} className="text-xs font-bold px-3 py-1.5 rounded-lg bg-emerald-500 text-white shadow-lg disabled:opacity-50">
+                      {savingOrder ? "Guardando..." : "Guardar Orden"}
+                    </button>
+                  ) : (
+                    <button onClick={() => setIsReordering(true)} className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-colors">
+                      <LogOut className="h-3 w-3 rotate-90" /> Ordenar
+                    </button>
+                  )}
+                  <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
+                    <CircleDollarSign className="h-4 w-4 text-brand-yellow" />
+                    <span className="text-sm font-semibold text-brand-yellow">Reparto</span>
+                  </div>
                 </div>
               </div>
               {/* Buscador de productos en POS */}
@@ -1628,47 +1944,73 @@ export default function BakeryDriverApp() {
               ) : displayedProducts.length === 0 ? (
                 <p className="text-center text-zinc-500 text-sm mt-10">No se encontraron productos.</p>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                  {displayedProducts.map(product => {
-                    const disabled = product.quantity === 0;
-                    const qty = cart[product.id] || 0;
-                    return (
-                      <div key={product.id}
-                        className={`flex items-center gap-3 rounded-2xl border px-3 py-2.5 transition-all ${
-                          disabled ? "border-zinc-800 bg-zinc-900/40 opacity-40" :
-                          qty > 0 ? "border-brand-red/40 bg-brand-red/5" : "border-white/10 bg-white/5"
-                        }`}>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold truncate">{product.name}</p>
-                          <p className="text-xs text-zinc-400">${product.price} · {product.quantity} disp.</p>
+                <>
+                  {isReordering ? (
+                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                      <SortableContext items={displayedProducts.map(p => p.id)} strategy={rectSortingStrategy}>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                          {displayedProducts.map(product => {
+                            const disabled = product.quantity === 0;
+                            const qty = cart[product.id] || 0;
+                            return (
+                              <SortableProductItem
+                                key={product.id}
+                                product={product}
+                                disabled={disabled}
+                                qty={qty}
+                                onUpdateQuantity={updateQuantity}
+                                onSetQuantity={handleSetQuantity}
+                                isReordering={isReordering}
+                              />
+                            );
+                          })}
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <button disabled={disabled} onClick={() => updateQuantity(product, -1)}
-                            className="h-8 w-8 flex items-center justify-center rounded-lg border border-white/10 bg-zinc-900/60 active:scale-95 disabled:opacity-40">
-                            <Minus className="h-3.5 w-3.5" />
-                          </button>
-                          <input
-                            type="number"
-                            min={0}
-                            max={product.quantity}
-                            value={qty === 0 ? "" : qty}
-                            onChange={e => handleSetQuantity(product, e.target.value)}
-                            onBlur={() => {
-                              if (qty === 0) setCart(prev => ({ ...prev, [product.id]: 0 }));
-                            }}
-                            onWheel={e => (e.target as HTMLElement).blur()}
-                            className="w-12 h-8 text-center text-sm font-bold bg-white/5 border border-white/10 rounded-lg outline-none focus:border-brand-red focus:bg-brand-red/10 text-white"
-                            style={{ appearance: "textfield", WebkitAppearance: "none", MozAppearance: "textfield" }}
-                          />
-                          <button disabled={disabled} onClick={() => updateQuantity(product, 1)}
-                            className="h-8 w-8 flex items-center justify-center rounded-lg bg-brand-red text-white shadow-sm shadow-brand-red/30 active:scale-95 disabled:opacity-40">
-                            <Plus className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      </SortableContext>
+                    </DndContext>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                      {displayedProducts.map(product => {
+                        const disabled = product.quantity === 0;
+                        const qty = cart[product.id] || 0;
+                        return (
+                          <div key={product.id}
+                            className={`flex items-center gap-3 rounded-2xl border px-3 py-2.5 transition-all ${
+                              disabled ? "border-zinc-800 bg-zinc-900/40 opacity-40" :
+                              qty > 0 ? "border-brand-red/40 bg-brand-red/5" : "border-white/10 bg-white/5"
+                            }`}>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold truncate">{product.name}</p>
+                              <p className="text-xs text-zinc-400">${product.price} · {product.quantity} disp.</p>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button disabled={disabled} onClick={() => updateQuantity(product, -1)}
+                                className="h-8 w-8 flex items-center justify-center rounded-lg border border-white/10 bg-zinc-900/60 active:scale-95 disabled:opacity-40">
+                                <Minus className="h-3.5 w-3.5" />
+                              </button>
+                              <input
+                                type="number"
+                                min={0}
+                                max={product.quantity}
+                                value={qty === 0 ? "" : qty}
+                                onChange={e => handleSetQuantity(product, e.target.value)}
+                                onBlur={() => {
+                                  if (qty === 0) setCart(prev => ({ ...prev, [product.id]: 0 }));
+                                }}
+                                onWheel={e => (e.target as HTMLElement).blur()}
+                                className="w-12 h-8 text-center text-sm font-bold bg-white/5 border border-white/10 rounded-lg outline-none focus:border-brand-red focus:bg-brand-red/10 text-white"
+                                style={{ appearance: "textfield", WebkitAppearance: "none", MozAppearance: "textfield" }}
+                              />
+                              <button disabled={disabled} onClick={() => updateQuantity(product, 1)}
+                                className="h-8 w-8 flex items-center justify-center rounded-lg bg-brand-red text-white shadow-sm shadow-brand-red/30 active:scale-95 disabled:opacity-40">
+                                <Plus className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -1817,64 +2159,52 @@ export default function BakeryDriverApp() {
                     <input value={adminStockSearch} onChange={e => { setAdminStockSearch(e.target.value); setAdminStockPage(1); }} placeholder="Buscar por nombre o código..."
                       className="h-12 w-full rounded-2xl border border-white/10 bg-white/5 pl-11 pr-4 text-sm outline-none placeholder:text-zinc-500 focus:border-brand-red" />
                   </div>
-                  {loadingAdminStock ? (
+                  {loadingAdminStock && adminStockPage === 1 ? (
                     <p className="text-center text-zinc-500 py-10">Cargando...</p>
                   ) : (
                     <div className="flex flex-col gap-2">
-                      {adminStock.map(item => (
-                        <div key={item.id} className={`rounded-xl border border-white/10 bg-white/5 p-3 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 transition-opacity ${item.disponible_reparto === 0 ? 'opacity-50 grayscale-[50%]' : ''}`}>
+                      {adminStock.map((item, index) => {
+                        const isLast = index === adminStock.length - 1;
+                        return (
+                        <div ref={isLast ? lastStockElementRef : null} key={item.id} className={`group flex flex-row items-center justify-between gap-2 p-3 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 transition-colors ${item.disponible_reparto === 0 ? 'opacity-50 grayscale-[50%]' : ''}`}>
                           
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1.5">
                               <p className="text-sm font-semibold truncate text-white">{item.name}</p>
-                              {item.disponible_reparto === 0 && <span className="bg-red-500/20 text-red-300 border border-red-500/30 text-[9px] px-1.5 py-0.5 rounded-full whitespace-nowrap">No Reparto</span>}
+                              {item.disponible_reparto === 0 && <span className="bg-red-500/20 text-red-300 text-[9px] px-1.5 py-0.5 rounded-full whitespace-nowrap">No Reparto</span>}
                             </div>
-                            <div className="flex items-center gap-2 text-xs text-zinc-400 mt-0.5">
+                            <div className="flex items-center gap-2 text-[11px] text-zinc-400 mt-1">
                               <span className="text-brand-yellow font-medium">${item.price}</span>
                               {item.codigo && <span>· Cod: {item.codigo}</span>}
                             </div>
                           </div>
                           
-                          <div className="flex items-center justify-around gap-4 bg-black/20 px-4 py-1.5 rounded-lg border border-white/5 w-full lg:w-auto shrink-0">
-                            <div className="text-center">
-                              <p className="text-[9px] text-zinc-500 uppercase tracking-wider">Local</p>
-                              <p className="text-sm font-bold text-white">{item.stock_local}</p>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <div className="flex flex-col items-center justify-center bg-black/40 rounded-lg w-10 h-10">
+                              <span className="text-[9px] text-zinc-500 font-medium leading-none mb-1">LOC</span>
+                              <span className="text-xs font-bold text-white leading-none">{item.stock_local}</span>
                             </div>
-                            <div className="w-px h-6 bg-white/10"></div>
-                            <div className="text-center">
-                              <p className="text-[9px] text-zinc-500 uppercase tracking-wider">Veh 1</p>
-                              <p className="text-sm font-bold text-white">{item.stock_vehiculo1}</p>
+                            <div className="flex flex-col items-center justify-center bg-black/40 rounded-lg w-10 h-10">
+                              <span className="text-[9px] text-zinc-500 font-medium leading-none mb-1">V1</span>
+                              <span className="text-xs font-bold text-white leading-none">{item.stock_vehiculo1}</span>
                             </div>
-                            <div className="w-px h-6 bg-white/10"></div>
-                            <div className="text-center">
-                              <p className="text-[9px] text-zinc-500 uppercase tracking-wider">Veh 2</p>
-                              <p className="text-sm font-bold text-white">{item.stock_vehiculo2}</p>
+                            <div className="flex flex-col items-center justify-center bg-black/40 rounded-lg w-10 h-10">
+                              <span className="text-[9px] text-zinc-500 font-medium leading-none mb-1">V2</span>
+                              <span className="text-xs font-bold text-white leading-none">{item.stock_vehiculo2}</span>
                             </div>
                           </div>
                           
-                          <button onClick={() => setEditingProduct(item)} className="w-full lg:w-auto bg-white/10 hover:bg-white/20 active:scale-95 text-xs font-semibold px-5 py-2.5 rounded-lg transition-all shrink-0 text-white">
-                            Editar
+                          <button onClick={() => setEditingProduct(item)} className="shrink-0 p-2.5 rounded-lg bg-white/5 hover:bg-brand-red/20 hover:text-brand-yellow active:scale-95 text-zinc-400 transition-all ml-1">
+                            <Edit2 className="w-4 h-4" />
                           </button>
                         </div>
-                      ))}
-                    </div>
-                  )}
-                  {/* Pagination Controls */}
-                  {!loadingAdminStock && adminStockTotalPages > 1 && (
-                    <div className="flex items-center justify-between bg-white/5 rounded-2xl p-4 border border-white/10 mt-4">
-                      <button 
-                        onClick={() => setAdminStockPage(p => Math.max(1, p - 1))} 
-                        disabled={adminStockPage === 1}
-                        className="px-4 py-2 bg-white/10 rounded-xl text-sm font-semibold disabled:opacity-30 active:scale-95 transition-all">
-                        Anterior
-                      </button>
-                      <span className="text-sm font-medium text-zinc-400">Página {adminStockPage} de {adminStockTotalPages}</span>
-                      <button 
-                        onClick={() => setAdminStockPage(p => Math.min(adminStockTotalPages, p + 1))} 
-                        disabled={adminStockPage === adminStockTotalPages}
-                        className="px-4 py-2 bg-white/10 rounded-xl text-sm font-semibold disabled:opacity-30 active:scale-95 transition-all">
-                        Siguiente
-                      </button>
+                      )})}
+                      
+                      {loadingAdminStock && adminStockPage > 1 && (
+                        <div className="flex justify-center items-center py-4">
+                          <RefreshCw className="w-5 h-5 text-brand-red animate-spin" />
+                        </div>
+                      )}
                     </div>
                   )}
                 </>
@@ -1899,34 +2229,134 @@ export default function BakeryDriverApp() {
           {/* ── CLIENTES ── */}
           {activeTab === "clientes" && !isVendedor && (
             <div className="space-y-4">
-              <h1 className="text-2xl font-bold">Clientes</h1>
-              <div className="relative">
-                <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar clientes..."
-                  className="h-12 w-full rounded-2xl border border-white/10 bg-white/5 pl-11 pr-4 text-sm outline-none placeholder:text-zinc-500 focus:border-brand-red" />
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <h1 className="text-2xl font-bold">Clientes {isAdmin ? "(Saldos & Gestión)" : ""}</h1>
+                
+                {isAdmin && (
+                  <div className="flex bg-black/20 p-1 rounded-xl border border-white/5 self-start sm:self-auto shrink-0">
+                    <button
+                      onClick={() => setAdminClientesTab('saldos')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                        adminClientesTab === 'saldos' ? 'bg-brand-red text-white' : 'text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      Saldos
+                    </button>
+                    <button
+                      onClick={() => setAdminClientesTab('gestion')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                        adminClientesTab === 'gestion' ? 'bg-brand-red text-white' : 'text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      Gestión (CRUD)
+                    </button>
+                  </div>
+                )}
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                {filteredClients.map(client => (
-                  <button key={client.id} onClick={() => setClienteDetalle(client)}
-                    className="w-full rounded-3xl border border-white/10 bg-white/5 p-4 text-left active:scale-[0.99] transition-all flex flex-col justify-between h-full">
-                    <div className="flex items-start justify-between gap-3 w-full">
-                      <div className="min-w-0 flex-1">
-                        <h3 className="text-base font-semibold truncate">{client.name}</h3>
-                        <p className="text-xs text-zinc-400 mt-0.5 truncate">{client.address}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between mt-4 w-full">
-                      <span className="text-xs text-zinc-500">Saldo</span>
-                      <div className="flex items-center gap-2">
-                        <div className={`rounded-xl px-3 py-1.5 text-sm font-bold ${client.balance > 0 ? "bg-red-500/20 text-red-300" : "bg-emerald-500/20 text-emerald-300"}`}>
-                          {client.balance > 0 ? `-$${client.balance.toLocaleString('es-AR')}` : "OK"}
+
+              {(!isAdmin || adminClientesTab === 'saldos') && (
+                <>
+                  <div className="relative">
+                    <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                    <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar clientes..."
+                      className="h-12 w-full rounded-2xl border border-white/10 bg-white/5 pl-11 pr-4 text-sm outline-none placeholder:text-zinc-500 focus:border-brand-red transition-colors" />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {filteredClients.map(client => (
+                      <button key={client.id} onClick={() => setClienteDetalle(client)}
+                        className="w-full rounded-2xl border border-white/10 bg-white/5 p-4 text-left active:scale-[0.99] transition-all flex items-center justify-between">
+                        <div className="flex flex-col min-w-0 pr-2">
+                          <h3 className="text-sm font-semibold truncate text-white">{client.name}</h3>
+                          <p className="text-[11px] text-zinc-400 mt-0.5 truncate">{client.address || "Sin dirección"}</p>
                         </div>
-                        <ChevronRight className="h-4 w-4 text-zinc-500" />
-                      </div>
+                        <div className="flex items-center gap-3 shrink-0">
+                          <div className={`rounded-xl px-3 py-1.5 text-xs font-bold ${client.balance > 0 ? "bg-red-500/20 text-red-300" : "bg-emerald-500/20 text-emerald-300"}`}>
+                            {client.balance > 0 ? `-$${client.balance.toLocaleString('es-AR')}` : "OK"}
+                          </div>
+                          <ChevronRight className="h-4 w-4 text-zinc-500" />
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {isAdmin && adminClientesTab === 'gestion' && (
+                <div className="space-y-4 relative pb-20">
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                      <input 
+                        value={adminPersonasSearch} 
+                        onChange={e => { setAdminPersonasSearch(e.target.value); setAdminPersonasPage(1); }} 
+                        placeholder="Buscar por nombre, email o teléfono..."
+                        className="h-12 w-full rounded-2xl border border-white/10 bg-white/5 pl-11 pr-4 text-sm outline-none placeholder:text-zinc-500 focus:border-brand-red transition-colors" 
+                      />
                     </div>
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    {adminPersonas.map((persona, i) => {
+                      const isLast = i === adminPersonas.length - 1;
+                      return (
+                        <div 
+                          key={persona.idpersona} 
+                          ref={isLast ? lastPersonaElementRef : null}
+                          className="w-full rounded-2xl border border-white/10 bg-white/5 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                        >
+                          <div className="flex flex-col min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <h3 className="text-sm font-semibold truncate text-white">{persona.nombre}</h3>
+                              <span className="text-[10px] uppercase font-bold tracking-wider bg-white/10 px-2 py-0.5 rounded-md text-zinc-300">
+                                {persona.tipo_persona}
+                              </span>
+                            </div>
+                            {persona.mail && <p className="text-[11px] text-zinc-400 truncate">Email: {persona.mail}</p>}
+                            {persona.telefono && <p className="text-[11px] text-zinc-400 truncate">Tel: {persona.telefono}</p>}
+                            {persona.user && <p className="text-[11px] text-brand-yellow truncate mt-1">Usuario: {persona.user.name}</p>}
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button 
+                              onClick={() => {
+                                setPersonaForm({
+                                  nombre: persona.nombre, tipo_persona: persona.tipo_persona, 
+                                  direccion: persona.direccion || "", telefono: persona.telefono || "", 
+                                  mail: persona.mail || "", user_id: persona.user_id || ""
+                                });
+                                setEditingPersona(persona);
+                              }}
+                              className="px-3 py-1.5 rounded-lg bg-blue-500/20 text-blue-300 text-xs font-semibold hover:bg-blue-500/30 transition-colors"
+                            >
+                              Editar
+                            </button>
+                            <button 
+                              onClick={() => handleDeletePersona(persona.idpersona)}
+                              className="px-3 py-1.5 rounded-lg bg-red-500/20 text-red-300 text-xs font-semibold hover:bg-red-500/30 transition-colors"
+                            >
+                              Borrar
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {loadingAdminPersonas && (
+                      <div className="flex justify-center py-4">
+                        <RefreshCw className="w-5 h-5 text-brand-red animate-spin" />
+                      </div>
+                    )}
+                  </div>
+                  
+                  <button 
+                    onClick={() => {
+                      setPersonaForm({ nombre: "", tipo_persona: "cliente", direccion: "", telefono: "", mail: "", user_id: "" });
+                      setEditingPersona({}); // Empty object means "new"
+                    }}
+                    className="fixed bottom-24 right-6 bg-brand-red text-white p-4 rounded-full shadow-lg hover:scale-105 active:scale-95 transition-all z-20 flex items-center justify-center group"
+                  >
+                    <Plus className="w-6 h-6" />
                   </button>
-                ))}
-              </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -2047,7 +2477,10 @@ export default function BakeryDriverApp() {
                       <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider">Cajas por Usuario</h3>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {historyCajas.map((caja: any) => (
-                          <div key={caja.user_id} className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-2">
+                          <div 
+                            key={caja.user_id} 
+                            onClick={() => setHistoryActiveFilter({ type: 'caja', value: caja.user_id })}
+                            className={`rounded-2xl border bg-white/5 p-4 space-y-2 cursor-pointer transition-all hover:bg-white/10 ${historyActiveFilter?.type === 'caja' && historyActiveFilter.value === caja.user_id ? 'border-brand-red ring-2 ring-brand-red/50 shadow-lg shadow-brand-red/20' : 'border-white/10'}`}>
                             <p className="font-bold text-white mb-2 pb-2 border-b border-white/10">📦 {caja.user_name}</p>
                             <div className="flex justify-between items-center text-sm">
                               <span className="text-zinc-400">💵 Efectivo a Rendir</span>
@@ -2073,15 +2506,21 @@ export default function BakeryDriverApp() {
                       {isAdmin ? 'Totales Generales' : 'Tu Caja'}
                     </h3>
                     <div className="grid grid-cols-2 gap-3">
-                      <div className="rounded-2xl bg-emerald-500/10 border border-emerald-500/20 p-4 col-span-2">
+                      <div 
+                        onClick={() => setHistoryActiveFilter({ type: 'payment', value: 'efectivo' })}
+                        className={`rounded-2xl bg-emerald-500/10 border p-4 col-span-2 cursor-pointer transition-all hover:bg-emerald-500/20 ${historyActiveFilter?.type === 'payment' && historyActiveFilter.value === 'efectivo' ? 'border-emerald-400 ring-2 ring-emerald-400/50 shadow-lg shadow-emerald-400/20' : 'border-emerald-500/20'}`}>
                         <p className="text-sm text-emerald-400/80 mb-1">💵 Efectivo en Mano (A Rendir)</p>
                         <p className="text-3xl font-bold text-emerald-400">${historyTotalEfectivo.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                       </div>
-                      <div className="rounded-2xl bg-blue-500/10 border border-blue-500/20 p-3">
+                      <div 
+                        onClick={() => setHistoryActiveFilter({ type: 'payment', value: 'transferencia' })}
+                        className={`rounded-2xl bg-blue-500/10 border p-3 cursor-pointer transition-all hover:bg-blue-500/20 ${historyActiveFilter?.type === 'payment' && historyActiveFilter.value === 'transferencia' ? 'border-blue-400 ring-2 ring-blue-400/50 shadow-lg shadow-blue-400/20' : 'border-blue-500/20'}`}>
                         <p className="text-xs text-blue-400/80">🏦 Transferencias</p>
                         <p className="text-lg font-bold text-blue-400">${historyTotalTransferencia.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                       </div>
-                      <div className="rounded-2xl bg-red-500/10 border border-red-500/20 p-3">
+                      <div 
+                        onClick={() => setHistoryActiveFilter({ type: 'payment', value: 'saldo' })}
+                        className={`rounded-2xl bg-red-500/10 border p-3 cursor-pointer transition-all hover:bg-red-500/20 ${historyActiveFilter?.type === 'payment' && historyActiveFilter.value === 'saldo' ? 'border-red-400 ring-2 ring-red-400/50 shadow-lg shadow-red-400/20' : 'border-red-500/20'}`}>
                         <p className="text-xs text-red-400/80">📝 Fiado / Cuenta Corriente</p>
                         <p className="text-lg font-bold text-red-400">${historyTotalSaldo.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                       </div>
@@ -2090,24 +2529,63 @@ export default function BakeryDriverApp() {
                       </div>
                     </div>
                   </div>
-                  {misVentas.length === 0 ? (
-                    <p className="text-center text-zinc-500 text-sm mt-10">Sin ventas registradas en esta fecha.</p>
+                  
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-bold text-white">Detalle de Movimientos</h3>
+                    {historyActiveFilter && (
+                      <button 
+                        onClick={() => setHistoryActiveFilter(null)}
+                        className="text-xs bg-white/10 hover:bg-brand-red/20 text-zinc-300 hover:text-brand-yellow px-3 py-1.5 rounded-full transition-colors flex items-center gap-1">
+                        <X className="w-3 h-3" /> Limpiar Filtro
+                      </button>
+                    )}
+                  </div>
+
+                  {filteredMisVentas.length === 0 ? (
+                    <p className="text-center text-zinc-500 text-sm mt-10">No hay movimientos que coincidan con el filtro actual.</p>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {misVentas.map(v => {
+                      {filteredMisVentas.map(v => {
                         const isCobro = v.tipo === "cobro_cuenta";
                         return (
                           <div key={`${v.tipo}-${v.id}`} className="rounded-2xl border border-white/10 bg-white/5 p-3 flex items-center justify-between hover:bg-white/10 transition-colors">
-                            <div>
-                              <p className="text-sm font-semibold">{v.customer}</p>
-                              <p className="text-xs text-zinc-400">
+                            <div className="flex-1 min-w-0 mr-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-sm font-semibold truncate">{v.customer}</p>
+                                <button 
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    try {
+                                      const res = await fetch(`${API_URL}/pedidos/${v.id}/comprobante`, {
+                                        headers: { Authorization: `Bearer ${token}` }
+                                      });
+                                      if (res.ok) {
+                                        const blob = await res.blob();
+                                        const url = window.URL.createObjectURL(blob);
+                                        const a = document.createElement("a");
+                                        a.href = url;
+                                        a.download = `Comprobante_${v.id}.pdf`;
+                                        document.body.appendChild(a);
+                                        a.click();
+                                        document.body.removeChild(a);
+                                        window.URL.revokeObjectURL(url);
+                                      } else alert("Error al descargar");
+                                    } catch { alert("Error de conexión"); }
+                                  }}
+                                  className="p-1.5 bg-white/10 rounded-md hover:bg-white/20 transition-colors shrink-0"
+                                  title="Descargar Comprobante"
+                                >
+                                  <Download className="w-3.5 h-3.5 text-zinc-300" />
+                                </button>
+                              </div>
+                              <p className="text-xs text-zinc-400 mt-0.5">
                                 {isCobro 
-                                  ? `${v.hora} · Cobro de Cuenta · Efectivo` 
-                                  : `${v.hora} · ${v.tipo === "pedido" ? "Pedido Entregado" : "Venta Directa"} · ${v.saldo > 0 && v.pago === 0 ? "Cuenta Corriente" : v.saldo > 0 ? `${v.forma_pago} + Saldo` : v.forma_pago}`
+                                  ? `${v.hora} · Cobro · Efectivo` 
+                                  : `${v.hora} · ${v.tipo === "pedido" ? "Pedido" : "Venta"} · ${v.forma_pago || 'Efectivo'}`
                                 }
                               </p>
                             </div>
-                            <div className="text-right">
+                            <div className="text-right shrink-0">
                               <p className={`text-sm font-bold ${isCobro ? "text-emerald-400" : "text-white"}`}>
                                 {isCobro ? "+" : ""}${v.total > 0 ? v.total.toLocaleString('es-AR') : v.pago.toLocaleString('es-AR')}
                               </p>
@@ -2180,6 +2658,51 @@ export default function BakeryDriverApp() {
                           </div>
                         ))}
                       </div>
+
+                      {clientStats && clientStats.top_clientes.length > 0 && (
+                        <div className="mt-10 border-t border-white/10 pt-8">
+                          <h3 className="text-lg font-bold text-white mb-4">🏆 Top 10 Clientes</h3>
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                            {clientStats.top_clientes.map((c, i) => (
+                              <div key={c.name} className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 rounded-full bg-brand-red/20 text-brand-yellow flex items-center justify-center font-bold text-sm">
+                                    {i + 1}
+                                  </div>
+                                  <div>
+                                    <p className="text-sm font-bold truncate text-white max-w-[120px]">{c.name}</p>
+                                    <p className="text-xs text-zinc-400">{c.total_compras} compras</p>
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-sm font-bold text-emerald-400">${Number(c.total_monto).toLocaleString('es-AR', {minimumFractionDigits: 2})}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {clientStats && clientStats.cambios.length > 0 && (
+                        <div className="mt-10 border-t border-white/10 pt-8">
+                          <h3 className="text-lg font-bold text-white mb-4">🔄 Cambios y Roturas (Por Cliente)</h3>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {clientStats.cambios.map((cambio, i) => (
+                              <div key={i} className="bg-red-500/5 border border-red-500/20 rounded-2xl p-4 flex items-center justify-between">
+                                <div>
+                                  <p className="text-sm font-bold text-white">{cambio.client_name}</p>
+                                  <p className="text-xs text-zinc-400">{cambio.product_name}</p>
+                                </div>
+                                <div className="text-right">
+                                  <span className="text-xs font-semibold text-red-400 bg-red-400/10 px-2 py-1 rounded-md">
+                                    {cambio.total_cambio} devueltos
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
@@ -2288,6 +2811,118 @@ export default function BakeryDriverApp() {
             fetchAllData(token!);
           }}
         />
+      )}
+
+      {/* ── Persona (CRUD) Modal ── */}
+      {editingPersona && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-[#1a1a1a] border border-white/10 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between p-4 border-b border-white/10">
+              <h2 className="text-lg font-bold text-white">
+                {editingPersona.idpersona ? "Editar Persona" : "Nueva Persona"}
+              </h2>
+              <button 
+                onClick={() => setEditingPersona(null)} 
+                className="p-2 rounded-full hover:bg-white/10 transition-colors"
+              >
+                <X className="w-5 h-5 text-zinc-400" />
+              </button>
+            </div>
+            
+            <form onSubmit={handleSavePersona} className="p-4 flex flex-col gap-4 overflow-y-auto">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-zinc-400">Tipo de Persona</label>
+                <select 
+                  value={personaForm.tipo_persona} 
+                  onChange={e => setPersonaForm({...personaForm, tipo_persona: e.target.value})}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-brand-red outline-none transition-colors appearance-none"
+                  required
+                >
+                  <option value="cliente" className="bg-[#1a1a1a] text-white">Cliente</option>
+                  <option value="proveedor" className="bg-[#1a1a1a] text-white">Proveedor</option>
+                  <option value="empleado" className="bg-[#1a1a1a] text-white">Empleado</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-zinc-400">Nombre Completo</label>
+                <input 
+                  type="text"
+                  value={personaForm.nombre} 
+                  onChange={e => setPersonaForm({...personaForm, nombre: e.target.value})}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-brand-red outline-none transition-colors"
+                  required 
+                  placeholder="Juan Perez"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-zinc-400">Dirección (Opcional)</label>
+                <input 
+                  type="text"
+                  value={personaForm.direccion} 
+                  onChange={e => setPersonaForm({...personaForm, direccion: e.target.value})}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-brand-red outline-none transition-colors"
+                  placeholder="Av. Falsa 123"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-zinc-400">Celular (Opcional)</label>
+                <input 
+                  type="text"
+                  value={personaForm.telefono} 
+                  onChange={e => setPersonaForm({...personaForm, telefono: e.target.value})}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-brand-red outline-none transition-colors"
+                  placeholder="3815000000"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-zinc-400">Email (Opcional)</label>
+                <input 
+                  type="email"
+                  value={personaForm.mail} 
+                  onChange={e => setPersonaForm({...personaForm, mail: e.target.value})}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-brand-red outline-none transition-colors"
+                  placeholder="juan@mail.com"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-zinc-400">Usuario Asociado (Opcional)</label>
+                <select 
+                  value={personaForm.user_id} 
+                  onChange={e => setPersonaForm({...personaForm, user_id: e.target.value})}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-brand-red outline-none transition-colors appearance-none"
+                >
+                  <option value="" className="bg-[#1a1a1a] text-white">-- Sin usuario --</option>
+                  {adminUsers.map(u => (
+                    <option key={u.id} value={u.id} className="bg-[#1a1a1a] text-white">{u.name} ({u.email})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="mt-2 pt-4 border-t border-white/10 flex gap-3">
+                <button 
+                  type="button" 
+                  onClick={() => setEditingPersona(null)}
+                  className="flex-1 py-3.5 rounded-xl font-bold bg-white/5 hover:bg-white/10 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={savingPersona}
+                  className="flex-1 py-3.5 rounded-xl font-bold bg-brand-red hover:bg-red-600 text-white transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {savingPersona && <RefreshCw className="w-4 h-4 animate-spin" />}
+                  {savingPersona ? "Guardando..." : "Guardar"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );
