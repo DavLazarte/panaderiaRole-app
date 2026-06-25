@@ -1385,19 +1385,21 @@ export default function BakeryDriverApp() {
   const [historyTotalFacturado, setHistoryTotalFacturado] = useState(0);
   const [historyCajas, setHistoryCajas] = useState<any[]>([]);
   const [historyActiveFilter, setHistoryActiveFilter] = useState<{ type: 'caja' | 'payment', value: any } | null>(null);
+  const [selectedVenta, setSelectedVenta] = useState<any | null>(null);
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+  const historyLoaderRef = useRef<HTMLDivElement | null>(null);
 
-  const filteredMisVentas = misVentas.filter(v => {
-    if (!historyActiveFilter) return true;
-    if (historyActiveFilter.type === 'caja') {
-      return v.user_id === historyActiveFilter.value;
-    }
-    if (historyActiveFilter.type === 'payment') {
-      if (historyActiveFilter.value === 'efectivo') return v.forma_pago === 'efectivo';
-      if (historyActiveFilter.value === 'transferencia') return v.forma_pago === 'transferencia';
-      if (historyActiveFilter.value === 'saldo') return v.tipo !== 'cobro_cuenta' && v.saldo > 0;
-    }
-    return true;
-  });
+  // Derived server-side filter params
+  const historyFormaPago = useMemo(() => {
+    if (!historyActiveFilter) return '';
+    if (historyActiveFilter.type === 'payment') return historyActiveFilter.value;
+    return '';
+  }, [historyActiveFilter]);
+  const historyFilterUserId = useMemo(() => {
+    if (!historyActiveFilter) return '';
+    if (historyActiveFilter.type === 'caja') return String(historyActiveFilter.value);
+    return '';
+  }, [historyActiveFilter]);
 
   useEffect(() => {
     if (!token || !user) return;
@@ -1406,6 +1408,8 @@ export default function BakeryDriverApp() {
       try {
         const headers = { Authorization: `Bearer ${token}` };
         let queryParams = `filter_type=${historyFilterType}&page=${historyPage}&search=${historySearch}&tipo=${historyType}`;
+        if (historyFormaPago) queryParams += `&forma_pago=${historyFormaPago}`;
+        if (historyFilterUserId) queryParams += `&user_id=${historyFilterUserId}`;
         if (historyFilterType === 'range') {
           queryParams += `&start_date=${historyStartDate}&end_date=${historyEndDate}`;
         } else if (historyFilterType === 'month') {
@@ -1418,8 +1422,10 @@ export default function BakeryDriverApp() {
         const res = await fetch(`${API_URL}/mis-ventas?${queryParams}`, { headers });
         if (res.ok) {
           const data = await res.json();
-          setMisVentas(data.paginator.data);
+          // Infinite scroll: append if page > 1, replace if page === 1
+          setMisVentas(prev => historyPage === 1 ? data.paginator.data : [...prev, ...data.paginator.data]);
           setHistoryTotalPages(data.paginator.last_page || 1);
+          setHistoryHasMore(data.paginator.current_page < (data.paginator.last_page || 1));
           setHistoryTotalEfectivo(data.total_efectivo || 0);
           setHistoryTotalTransferencia(data.total_transferencia || 0);
           setHistoryTotalSaldo(data.total_saldo || 0);
@@ -1442,7 +1448,24 @@ export default function BakeryDriverApp() {
       fetchHistory();
     }, 400);
     return () => clearTimeout(delayDebounceFn);
-  }, [token, user, historyFilterType, historyDate, historyStartDate, historyEndDate, historyMonthYear, historyRefresh, historyPage, historySearch, historyType]);
+  }, [token, user, historyFilterType, historyDate, historyStartDate, historyEndDate, historyMonthYear, historyRefresh, historyPage, historySearch, historyType, historyFormaPago, historyFilterUserId]);
+
+  // Reset to page 1 when filters change (not page itself)
+  useEffect(() => {
+    setHistoryPage(1);
+    setMisVentas([]);
+  }, [historyFilterType, historyDate, historyStartDate, historyEndDate, historyMonthYear, historySearch, historyType, historyFormaPago, historyFilterUserId]);
+
+  // Intersection observer for infinite scroll
+  useEffect(() => {
+    if (!historyLoaderRef.current || !historyHasMore || loadingHistory) return;
+    const obs = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) setHistoryPage(p => p + 1);
+    }, { threshold: 0.5 });
+    obs.observe(historyLoaderRef.current);
+    return () => obs.disconnect();
+  }, [historyHasMore, loadingHistory]);
+
 
   const observerRef = useRef<IntersectionObserver | null>(null);
   const lastStockElementRef = useCallback((node: any) => {
@@ -2363,6 +2386,78 @@ export default function BakeryDriverApp() {
           {/* ── MIS VENTAS ── */}
           {activeTab === "ventas" && (
             <div className="space-y-4">
+              {/* Sale Detail Modal */}
+              {selectedVenta && (
+                <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setSelectedVenta(null)}>
+                  <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+                  <div className="relative w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border border-white/10 bg-zinc-950 p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+                    <div className="flex items-start justify-between mb-4">
+                      <div>
+                        <h3 className="text-lg font-bold text-white">{selectedVenta.customer}</h3>
+                        <p className="text-xs text-zinc-400 mt-0.5">
+                          {selectedVenta.hora} &middot; {selectedVenta.tipo === 'cobro_cuenta' ? 'Cobro' : selectedVenta.tipo === 'pedido' ? 'Pedido' : 'Venta'} &middot; {selectedVenta.forma_pago || 'Efectivo'}
+                        </p>
+                      </div>
+                      <button onClick={() => setSelectedVenta(null)} className="p-2 bg-white/5 hover:bg-white/10 rounded-xl transition-colors">
+                        <X className="w-4 h-4 text-zinc-400" />
+                      </button>
+                    </div>
+
+                    {selectedVenta.items && selectedVenta.items.length > 0 ? (
+                      <div className="space-y-2 mb-4 max-h-60 overflow-y-auto">
+                        {selectedVenta.items.map((item: any, i: number) => (
+                          <div key={i} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-white truncate">{item.name}</p>
+                              <p className="text-xs text-zinc-500">{item.cantidad} x ${item.precio.toLocaleString('es-AR')}</p>
+                            </div>
+                            <p className="text-sm font-bold text-white shrink-0 ml-2">${(item.cantidad * item.precio).toLocaleString('es-AR')}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-zinc-500 mb-4">{selectedVenta.tipo === 'cobro_cuenta' ? 'Cobro de cuenta corriente.' : 'Sin detalle de items disponible.'}</p>
+                    )}
+
+                    <div className="space-y-2 pt-3 border-t border-white/10">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-zinc-400">Total</span>
+                        <span className="font-bold text-white">${(selectedVenta.total || selectedVenta.pago).toLocaleString('es-AR')}</span>
+                      </div>
+                      {selectedVenta.pago > 0 && selectedVenta.tipo !== 'cobro_cuenta' && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-zinc-400">Pagado</span>
+                          <span className="font-bold text-emerald-400">${selectedVenta.pago.toLocaleString('es-AR')}</span>
+                        </div>
+                      )}
+                      {selectedVenta.saldo > 0 && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-zinc-400">Saldo deudor</span>
+                          <span className="font-bold text-red-400">${selectedVenta.saldo.toLocaleString('es-AR')}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      onClick={async () => {
+                        try {
+                          const res = await fetch(`${API_URL}/pedidos/${selectedVenta.id}/comprobante`, { headers: { Authorization: `Bearer ${token}` } });
+                          if (res.ok) {
+                            const blob = await res.blob();
+                            const url = window.URL.createObjectURL(blob);
+                            const a = document.createElement("a"); a.href = url; a.download = `Comprobante_${selectedVenta.id}.pdf`;
+                            document.body.appendChild(a); a.click(); document.body.removeChild(a); window.URL.revokeObjectURL(url);
+                          } else alert("Error al descargar");
+                        } catch { alert("Error de conexi\u00f3n"); }
+                      }}
+                      className="mt-4 w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-brand-red text-white font-bold text-sm hover:bg-red-600 transition-colors active:scale-95"
+                    >
+                      <Download className="w-4 h-4" /> Descargar Comprobante
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="flex flex-col gap-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <h1 className="text-2xl font-bold">Historial {isAdmin ? "(Admin)" : ""}</h1>
@@ -2466,11 +2561,7 @@ export default function BakeryDriverApp() {
                 </div>
               )}
 
-              {loadingHistory ? (
-                <div className="flex justify-center items-center py-20">
-                  <RefreshCw className="w-6 h-6 text-brand-red animate-spin" />
-                </div>
-              ) : historyTab === 'movimientos' || !isAdmin ? (
+              {historyTab === 'movimientos' || !isAdmin ? (
                 <>
                   {isAdmin && historyCajas.length > 0 && (
                     <div className="mb-6 space-y-3">
@@ -2541,18 +2632,22 @@ export default function BakeryDriverApp() {
                     )}
                   </div>
 
-                  {filteredMisVentas.length === 0 ? (
+                  {misVentas.length === 0 && !loadingHistory ? (
                     <p className="text-center text-zinc-500 text-sm mt-10">No hay movimientos que coincidan con el filtro actual.</p>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {filteredMisVentas.map(v => {
+                      {misVentas.map(v => {
                         const isCobro = v.tipo === "cobro_cuenta";
                         return (
-                          <div key={`${v.tipo}-${v.id}`} className="rounded-2xl border border-white/10 bg-white/5 p-3 flex items-center justify-between hover:bg-white/10 transition-colors">
+                          <div
+                            key={`${v.tipo}-${v.id}`}
+                            onClick={() => setSelectedVenta(v)}
+                            className="rounded-2xl border border-white/10 bg-white/5 p-3 flex items-center justify-between hover:bg-white/10 active:scale-[0.98] transition-all cursor-pointer"
+                          >
                             <div className="flex-1 min-w-0 mr-2">
                               <div className="flex items-center justify-between gap-2">
                                 <p className="text-sm font-semibold truncate">{v.customer}</p>
-                                <button 
+                                <button
                                   onClick={async (e) => {
                                     e.stopPropagation();
                                     try {
@@ -2579,8 +2674,8 @@ export default function BakeryDriverApp() {
                                 </button>
                               </div>
                               <p className="text-xs text-zinc-400 mt-0.5">
-                                {isCobro 
-                                  ? `${v.hora} · Cobro · Efectivo` 
+                                {isCobro
+                                  ? `${v.hora} · Cobro · Efectivo`
                                   : `${v.hora} · ${v.tipo === "pedido" ? "Pedido" : "Venta"} · ${v.forma_pago || 'Efectivo'}`
                                 }
                               </p>
@@ -2602,19 +2697,15 @@ export default function BakeryDriverApp() {
                       })}
                     </div>
                   )}
-                  
-                  {misVentas.length > 0 && historyTotalPages > 1 && (
-                    <div className="flex items-center justify-center gap-4 mt-6">
-                      <button disabled={historyPage === 1} onClick={() => setHistoryPage(p => p - 1)}
-                        className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-sm font-semibold hover:bg-white/10 disabled:opacity-30 active:scale-95 transition-all">
-                        Anterior
-                      </button>
-                      <span className="text-sm font-semibold text-zinc-400">Pág {historyPage} de {historyTotalPages}</span>
-                      <button disabled={historyPage === historyTotalPages} onClick={() => setHistoryPage(p => p + 1)}
-                        className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-sm font-semibold hover:bg-white/10 disabled:opacity-30 active:scale-95 transition-all">
-                        Siguiente
-                      </button>
+
+                  {/* Infinite scroll sentinel */}
+                  {historyHasMore && (
+                    <div ref={historyLoaderRef} className="flex justify-center py-4">
+                      <RefreshCw className="w-5 h-5 text-zinc-500 animate-spin" />
                     </div>
+                  )}
+                  {loadingHistory && misVentas.length === 0 && (
+                    <div className="flex justify-center py-10"><RefreshCw className="w-6 h-6 text-brand-red animate-spin" /></div>
                   )}
                 </>
               ) : (
