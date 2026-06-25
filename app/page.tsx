@@ -1386,20 +1386,15 @@ export default function BakeryDriverApp() {
   const [historyCajas, setHistoryCajas] = useState<any[]>([]);
   const [historyActiveFilter, setHistoryActiveFilter] = useState<{ type: 'caja' | 'payment', value: any } | null>(null);
   const [selectedVenta, setSelectedVenta] = useState<any | null>(null);
+  const [selectedCaja, setSelectedCaja] = useState<any | null>(null); // caja detail modal
+  const [cajaSales, setCajaSales] = useState<any[]>([]);
+  const [loadingCajaSales, setLoadingCajaSales] = useState(false);
   const [historyHasMore, setHistoryHasMore] = useState(false);
   const historyLoaderRef = useRef<HTMLDivElement | null>(null);
 
-  // Derived server-side filter params
-  const historyFormaPago = useMemo(() => {
-    if (!historyActiveFilter) return '';
-    if (historyActiveFilter.type === 'payment') return historyActiveFilter.value;
-    return '';
-  }, [historyActiveFilter]);
-  const historyFilterUserId = useMemo(() => {
-    if (!historyActiveFilter) return '';
-    if (historyActiveFilter.type === 'caja') return String(historyActiveFilter.value);
-    return '';
-  }, [historyActiveFilter]);
+  // Only payment filter goes to server; caja opens a modal (no server filter)
+  const historyFormaPago = historyActiveFilter?.type === 'payment' ? (historyActiveFilter.value as string) : '';
+
 
   useEffect(() => {
     if (!token || !user) return;
@@ -1409,7 +1404,6 @@ export default function BakeryDriverApp() {
         const headers = { Authorization: `Bearer ${token}` };
         let queryParams = `filter_type=${historyFilterType}&page=${historyPage}&search=${historySearch}&tipo=${historyType}`;
         if (historyFormaPago) queryParams += `&forma_pago=${historyFormaPago}`;
-        if (historyFilterUserId) queryParams += `&user_id=${historyFilterUserId}`;
         if (historyFilterType === 'range') {
           queryParams += `&start_date=${historyStartDate}&end_date=${historyEndDate}`;
         } else if (historyFilterType === 'month') {
@@ -1448,13 +1442,13 @@ export default function BakeryDriverApp() {
       fetchHistory();
     }, 400);
     return () => clearTimeout(delayDebounceFn);
-  }, [token, user, historyFilterType, historyDate, historyStartDate, historyEndDate, historyMonthYear, historyRefresh, historyPage, historySearch, historyType, historyFormaPago, historyFilterUserId]);
+  }, [token, user, historyFilterType, historyDate, historyStartDate, historyEndDate, historyMonthYear, historyRefresh, historyPage, historySearch, historyType, historyFormaPago]);
 
   // Reset to page 1 when filters change (not page itself)
   useEffect(() => {
     setHistoryPage(1);
     setMisVentas([]);
-  }, [historyFilterType, historyDate, historyStartDate, historyEndDate, historyMonthYear, historySearch, historyType, historyFormaPago, historyFilterUserId]);
+  }, [historyFilterType, historyDate, historyStartDate, historyEndDate, historyMonthYear, historySearch, historyType, historyFormaPago]);
 
   // Intersection observer for infinite scroll
   useEffect(() => {
@@ -1465,6 +1459,38 @@ export default function BakeryDriverApp() {
     obs.observe(historyLoaderRef.current);
     return () => obs.disconnect();
   }, [historyHasMore, loadingHistory]);
+
+  useEffect(() => {
+    if (!selectedCaja || !token) {
+      setCajaSales([]);
+      return;
+    }
+    const fetchCajaSales = async () => {
+      setLoadingCajaSales(true);
+      try {
+        let queryParams = `filter_type=${historyFilterType}&search=${historySearch}&tipo=${historyType}&user_id=${selectedCaja.user_id}`;
+        if (historyFilterType === 'range') {
+          queryParams += `&start_date=${historyStartDate}&end_date=${historyEndDate}`;
+        } else if (historyFilterType === 'month') {
+          const [year, month] = historyMonthYear.split("-");
+          queryParams += `&month=${month}&year=${year}`;
+        } else {
+          queryParams += `&date=${historyDate}`;
+        }
+        const res = await fetch(`${API_URL}/mis-ventas?${queryParams}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setCajaSales(data.paginator.data || []);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+      setLoadingCajaSales(false);
+    };
+    fetchCajaSales();
+  }, [selectedCaja, token, historyFilterType, historyDate, historyStartDate, historyEndDate, historyMonthYear, historySearch, historyType]);
 
 
   const observerRef = useRef<IntersectionObserver | null>(null);
@@ -2185,44 +2211,30 @@ export default function BakeryDriverApp() {
                   {loadingAdminStock && adminStockPage === 1 ? (
                     <p className="text-center text-zinc-500 py-10">Cargando...</p>
                   ) : (
-                    <div className="flex flex-col gap-2">
+                    <div className="flex flex-col gap-1.5">
                       {adminStock.map((item, index) => {
                         const isLast = index === adminStock.length - 1;
                         return (
-                        <div ref={isLast ? lastStockElementRef : null} key={item.id} className={`group flex flex-row items-center justify-between gap-2 p-3 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 transition-colors ${item.disponible_reparto === 0 ? 'opacity-50 grayscale-[50%]' : ''}`}>
-                          
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <p className="text-sm font-semibold truncate text-white">{item.name}</p>
-                              {item.disponible_reparto === 0 && <span className="bg-red-500/20 text-red-300 text-[9px] px-1.5 py-0.5 rounded-full whitespace-nowrap">No Reparto</span>}
+                          <div ref={isLast ? lastStockElementRef : null} key={item.id}
+                            className={`flex flex-row items-center gap-3 px-3 py-2.5 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 transition-colors ${item.disponible_reparto === 0 ? 'opacity-50' : ''}`}>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-white leading-snug" style={{overflowWrap:'anywhere'}}>{item.name}</p>
+                              <p className="text-xs text-zinc-400 font-medium mt-0.5">${item.price}</p>
                             </div>
-                            <div className="flex items-center gap-2 text-[11px] text-zinc-400 mt-1">
-                              <span className="text-brand-yellow font-medium">${item.price}</span>
-                              {item.codigo && <span>· Cod: {item.codigo}</span>}
+                            <div className="hidden sm:flex items-center gap-1 shrink-0">
+                              {([{label:'LOC',val:item.stock_local},{label:'V1',val:item.stock_vehiculo1},{label:'V2',val:item.stock_vehiculo2}] as {label:string,val:number}[]).map(s => (
+                                <div key={s.label} className="flex flex-col items-center justify-center bg-black/40 rounded-lg w-9 h-9">
+                                  <span className="text-[9px] text-zinc-500 font-medium leading-none">{s.label}</span>
+                                  <span className="text-xs font-bold text-white leading-none mt-0.5">{s.val}</span>
+                                </div>
+                              ))}
                             </div>
+                            <button onClick={() => setEditingProduct(item)} className="shrink-0 p-2 rounded-lg bg-white/5 hover:bg-brand-red/20 hover:text-brand-yellow text-zinc-400 transition-all active:scale-95">
+                              <Edit2 className="w-4 h-4" />
+                            </button>
                           </div>
-                          
-                          <div className="flex items-center gap-1 shrink-0">
-                            <div className="flex flex-col items-center justify-center bg-black/40 rounded-lg w-10 h-10">
-                              <span className="text-[9px] text-zinc-500 font-medium leading-none mb-1">LOC</span>
-                              <span className="text-xs font-bold text-white leading-none">{item.stock_local}</span>
-                            </div>
-                            <div className="flex flex-col items-center justify-center bg-black/40 rounded-lg w-10 h-10">
-                              <span className="text-[9px] text-zinc-500 font-medium leading-none mb-1">V1</span>
-                              <span className="text-xs font-bold text-white leading-none">{item.stock_vehiculo1}</span>
-                            </div>
-                            <div className="flex flex-col items-center justify-center bg-black/40 rounded-lg w-10 h-10">
-                              <span className="text-[9px] text-zinc-500 font-medium leading-none mb-1">V2</span>
-                              <span className="text-xs font-bold text-white leading-none">{item.stock_vehiculo2}</span>
-                            </div>
-                          </div>
-                          
-                          <button onClick={() => setEditingProduct(item)} className="shrink-0 p-2.5 rounded-lg bg-white/5 hover:bg-brand-red/20 hover:text-brand-yellow active:scale-95 text-zinc-400 transition-all ml-1">
-                            <Edit2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      )})}
-                      
+                        );
+                      })}
                       {loadingAdminStock && adminStockPage > 1 && (
                         <div className="flex justify-center items-center py-4">
                           <RefreshCw className="w-5 h-5 text-brand-red animate-spin" />
@@ -2386,78 +2398,6 @@ export default function BakeryDriverApp() {
           {/* ── MIS VENTAS ── */}
           {activeTab === "ventas" && (
             <div className="space-y-4">
-              {/* Sale Detail Modal */}
-              {selectedVenta && (
-                <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setSelectedVenta(null)}>
-                  <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
-                  <div className="relative w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border border-white/10 bg-zinc-950 p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
-                    <div className="flex items-start justify-between mb-4">
-                      <div>
-                        <h3 className="text-lg font-bold text-white">{selectedVenta.customer}</h3>
-                        <p className="text-xs text-zinc-400 mt-0.5">
-                          {selectedVenta.hora} &middot; {selectedVenta.tipo === 'cobro_cuenta' ? 'Cobro' : selectedVenta.tipo === 'pedido' ? 'Pedido' : 'Venta'} &middot; {selectedVenta.forma_pago || 'Efectivo'}
-                        </p>
-                      </div>
-                      <button onClick={() => setSelectedVenta(null)} className="p-2 bg-white/5 hover:bg-white/10 rounded-xl transition-colors">
-                        <X className="w-4 h-4 text-zinc-400" />
-                      </button>
-                    </div>
-
-                    {selectedVenta.items && selectedVenta.items.length > 0 ? (
-                      <div className="space-y-2 mb-4 max-h-60 overflow-y-auto">
-                        {selectedVenta.items.map((item: any, i: number) => (
-                          <div key={i} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-semibold text-white truncate">{item.name}</p>
-                              <p className="text-xs text-zinc-500">{item.cantidad} x ${item.precio.toLocaleString('es-AR')}</p>
-                            </div>
-                            <p className="text-sm font-bold text-white shrink-0 ml-2">${(item.cantidad * item.precio).toLocaleString('es-AR')}</p>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-zinc-500 mb-4">{selectedVenta.tipo === 'cobro_cuenta' ? 'Cobro de cuenta corriente.' : 'Sin detalle de items disponible.'}</p>
-                    )}
-
-                    <div className="space-y-2 pt-3 border-t border-white/10">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-zinc-400">Total</span>
-                        <span className="font-bold text-white">${(selectedVenta.total || selectedVenta.pago).toLocaleString('es-AR')}</span>
-                      </div>
-                      {selectedVenta.pago > 0 && selectedVenta.tipo !== 'cobro_cuenta' && (
-                        <div className="flex justify-between text-sm">
-                          <span className="text-zinc-400">Pagado</span>
-                          <span className="font-bold text-emerald-400">${selectedVenta.pago.toLocaleString('es-AR')}</span>
-                        </div>
-                      )}
-                      {selectedVenta.saldo > 0 && (
-                        <div className="flex justify-between text-sm">
-                          <span className="text-zinc-400">Saldo deudor</span>
-                          <span className="font-bold text-red-400">${selectedVenta.saldo.toLocaleString('es-AR')}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    <button
-                      onClick={async () => {
-                        try {
-                          const res = await fetch(`${API_URL}/pedidos/${selectedVenta.id}/comprobante`, { headers: { Authorization: `Bearer ${token}` } });
-                          if (res.ok) {
-                            const blob = await res.blob();
-                            const url = window.URL.createObjectURL(blob);
-                            const a = document.createElement("a"); a.href = url; a.download = `Comprobante_${selectedVenta.id}.pdf`;
-                            document.body.appendChild(a); a.click(); document.body.removeChild(a); window.URL.revokeObjectURL(url);
-                          } else alert("Error al descargar");
-                        } catch { alert("Error de conexi\u00f3n"); }
-                      }}
-                      className="mt-4 w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-brand-red text-white font-bold text-sm hover:bg-red-600 transition-colors active:scale-95"
-                    >
-                      <Download className="w-4 h-4" /> Descargar Comprobante
-                    </button>
-                  </div>
-                </div>
-              )}
-
               <div className="flex flex-col gap-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <h1 className="text-2xl font-bold">Historial {isAdmin ? "(Admin)" : ""}</h1>
@@ -2568,10 +2508,10 @@ export default function BakeryDriverApp() {
                       <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider">Cajas por Usuario</h3>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {historyCajas.map((caja: any) => (
-                          <div 
-                            key={caja.user_id} 
-                            onClick={() => setHistoryActiveFilter({ type: 'caja', value: caja.user_id })}
-                            className={`rounded-2xl border bg-white/5 p-4 space-y-2 cursor-pointer transition-all hover:bg-white/10 ${historyActiveFilter?.type === 'caja' && historyActiveFilter.value === caja.user_id ? 'border-brand-red ring-2 ring-brand-red/50 shadow-lg shadow-brand-red/20' : 'border-white/10'}`}>
+                          <div
+                            key={caja.user_id}
+                            onClick={() => setSelectedCaja(caja)}
+                            className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-2 cursor-pointer transition-all hover:bg-white/10 hover:border-white/20 active:scale-[0.98]">
                             <p className="font-bold text-white mb-2 pb-2 border-b border-white/10">📦 {caja.user_name}</p>
                             <div className="flex justify-between items-center text-sm">
                               <span className="text-zinc-400">💵 Efectivo a Rendir</span>
@@ -3012,6 +2952,167 @@ export default function BakeryDriverApp() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Sale Detail Modal */}
+      {selectedVenta && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setSelectedVenta(null)}>
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+          <div className="relative w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border border-white/10 bg-zinc-950 p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-bold text-white">{selectedVenta.customer}</h3>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  {selectedVenta.hora} &middot; {selectedVenta.tipo === 'cobro_cuenta' ? 'Cobro' : selectedVenta.tipo === 'pedido' ? 'Pedido' : 'Venta'} &middot; {selectedVenta.forma_pago || 'Efectivo'}
+                </p>
+              </div>
+              <button onClick={() => setSelectedVenta(null)} className="p-2 bg-white/5 hover:bg-white/10 rounded-xl transition-colors">
+                <X className="w-4 h-4 text-zinc-400" />
+              </button>
+            </div>
+
+            {selectedVenta.items && selectedVenta.items.length > 0 ? (
+              <div className="space-y-2 mb-4 max-h-60 overflow-y-auto">
+                {selectedVenta.items.map((item: any, i: number) => (
+                  <div key={i} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-white truncate">{item.name}</p>
+                      <p className="text-xs text-zinc-500">{item.cantidad} x ${item.precio.toLocaleString('es-AR')}</p>
+                    </div>
+                    <p className="text-sm font-bold text-white shrink-0 ml-2">${(item.cantidad * item.precio).toLocaleString('es-AR')}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-zinc-500 mb-4">{selectedVenta.tipo === 'cobro_cuenta' ? 'Cobro de cuenta corriente.' : 'Sin detalle de items disponible.'}</p>
+            )}
+
+            <div className="space-y-2 pt-3 border-t border-white/10">
+              <div className="flex justify-between text-sm">
+                <span className="text-zinc-400">Total</span>
+                <span className="font-bold text-white">${(selectedVenta.total || selectedVenta.pago).toLocaleString('es-AR')}</span>
+              </div>
+              {selectedVenta.pago > 0 && selectedVenta.tipo !== 'cobro_cuenta' && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-zinc-400">Pagado</span>
+                  <span className="font-bold text-emerald-400">${selectedVenta.pago.toLocaleString('es-AR')}</span>
+                </div>
+              )}
+              {selectedVenta.saldo > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-zinc-400">Saldo deudor</span>
+                  <span className="font-bold text-red-400">${selectedVenta.saldo.toLocaleString('es-AR')}</span>
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={async () => {
+                try {
+                  const res = await fetch(`${API_URL}/pedidos/${selectedVenta.id}/comprobante`, { headers: { Authorization: `Bearer ${token}` } });
+                  if (res.ok) {
+                    const blob = await res.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement("a"); a.href = url; a.download = `Comprobante_${selectedVenta.id}.pdf`;
+                    document.body.appendChild(a); a.click(); document.body.removeChild(a); window.URL.revokeObjectURL(url);
+                  } else alert("Error al descargar");
+                } catch { alert("Error de conexi\u00f3n"); }
+              }}
+              className="mt-4 w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-brand-red text-white font-bold text-sm hover:bg-red-600 transition-colors active:scale-95"
+            >
+              <Download className="w-4 h-4" /> Descargar Comprobante
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Caja Detail Modal */}
+      {selectedCaja && (
+        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4" onClick={() => setSelectedCaja(null)}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div className="relative w-full max-w-md rounded-t-3xl md:rounded-3xl border-t md:border border-white/10 bg-zinc-950 p-6 pb-10 md:pb-6 shadow-2xl overflow-y-auto transition-all duration-300" style={{ maxHeight: "85vh" }} onClick={e => e.stopPropagation()}>
+            <div className="mx-auto mb-5 h-1 w-12 rounded-full bg-white/20 md:hidden" />
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h2 className="text-xl font-bold text-white">📦 Caja: {selectedCaja.user_name}</h2>
+                <p className="text-xs text-zinc-400 mt-0.5">Resumen de caja y listado de movimientos</p>
+              </div>
+              <button onClick={() => setSelectedCaja(null)} className="p-2 rounded-full bg-white/5 border border-white/10">
+                <X className="h-5 w-5 text-zinc-400" />
+              </button>
+            </div>
+
+            {/* Summary Cards */}
+            <div className="grid grid-cols-3 gap-2 mb-6">
+              <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3 text-center">
+                <span className="text-[10px] text-emerald-400/80 uppercase block font-semibold mb-1">Efectivo</span>
+                <span className="text-sm font-bold text-emerald-400">${selectedCaja.total_efectivo.toLocaleString('es-AR')}</span>
+              </div>
+              <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 text-center">
+                <span className="text-[10px] text-blue-400/80 uppercase block font-semibold mb-1">Transf.</span>
+                <span className="text-sm font-bold text-blue-400">${selectedCaja.total_transferencia.toLocaleString('es-AR')}</span>
+              </div>
+              <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 text-center">
+                <span className="text-[10px] text-red-400/80 uppercase block font-semibold mb-1">Fiado</span>
+                <span className="text-sm font-bold text-red-400">${selectedCaja.total_saldo.toLocaleString('es-AR')}</span>
+              </div>
+            </div>
+
+            {/* Sales List Title */}
+            <h3 className="text-xs text-zinc-500 uppercase tracking-widest mb-3">Últimos movimientos</h3>
+
+            {/* Sales List Container */}
+            <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+              {loadingCajaSales ? (
+                <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-16 rounded-2xl bg-white/5 animate-pulse" />)}</div>
+              ) : cajaSales.length === 0 ? (
+                <p className="text-center text-zinc-500 text-sm mt-6">Sin movimientos registrados</p>
+              ) : (
+                <div className="space-y-3">
+                  {cajaSales.map(v => {
+                    const isCobro = v.tipo === "cobro_cuenta";
+                    return (
+                      <div
+                        key={v.id}
+                        onClick={() => {
+                          setSelectedVenta(v);
+                        }}
+                        className="rounded-2xl border border-white/10 bg-white/5 p-3 hover:bg-white/10 transition-colors cursor-pointer"
+                      >
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1 min-w-0 pr-2">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold uppercase ${
+                                isCobro 
+                                  ? "bg-emerald-500/20 text-emerald-300"
+                                  : v.tipo === "pedido"
+                                    ? "bg-purple-500/20 text-purple-300"
+                                    : "bg-blue-500/20 text-blue-300"
+                              }`}>
+                                {isCobro ? "Cobro" : v.tipo === "pedido" ? "Pedido" : "Venta"}
+                              </span>
+                              <span className="text-xs text-zinc-400">{v.hora} hs</span>
+                            </div>
+                            <p className="text-sm font-semibold text-white mt-1.5 truncate">{v.customer}</p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="text-sm font-bold text-white">${(isCobro ? v.pago : v.total).toLocaleString('es-AR')}</p>
+                            {!isCobro && v.saldo > 0 && <p className="text-xs text-red-400">Debe ${v.saldo.toLocaleString('es-AR')}</p>}
+                            {!isCobro && v.saldo === 0 && <p className="text-xs text-emerald-400">Pagado</p>}
+                          </div>
+                        </div>
+                        <div className="mt-2 flex items-center gap-2 flex-wrap">
+                          <span className="text-[10px] bg-white/5 border border-white/10 rounded-lg px-2 py-0.5 text-zinc-400 uppercase">{v.forma_pago || 'Efectivo'}</span>
+                          {v.pago > 0 && <span className="text-[10px] bg-white/5 border border-white/10 rounded-lg px-2 py-0.5 text-zinc-400">Pagó ${v.pago.toLocaleString('es-AR')}</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
