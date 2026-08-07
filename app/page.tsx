@@ -100,6 +100,7 @@ function CheckoutModal({
   const [loading, setLoading] = useState(false);
   const [completedVentaId, setCompletedVentaId] = useState<number | null>(null);
   const [loadingPdf, setLoadingPdf] = useState(false);
+  const [imprimirDoble, setImprimirDoble] = useState(false);
   const [cambios, setCambios] = useState<Record<number, number>>({});
   const [hasExchanges, setHasExchanges] = useState(false);
   const [customPrices, setCustomPrices] = useState<Record<number, number>>({});
@@ -245,7 +246,7 @@ function CheckoutModal({
     if (!completedVentaId) return;
     setLoadingPdf(true);
     try {
-      const res = await fetch(`${API_URL}/pedidos/${completedVentaId}/comprobante`, {
+      const res = await fetch(`${API_URL}/pedidos/${completedVentaId}/comprobante?doble=${imprimirDoble}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) {
@@ -281,6 +282,10 @@ function CheckoutModal({
           <h2 className="text-xl font-bold text-white mb-2">¡Venta Exitosa!</h2>
           <p className="text-sm text-zinc-400 mb-6">El pedido de reparto fue registrado correctamente.</p>
           <div className="flex flex-col gap-3 w-full">
+            <label className="flex items-center justify-center gap-2 cursor-pointer text-zinc-300">
+              <input type="checkbox" checked={imprimirDoble} onChange={(e) => setImprimirDoble(e.target.checked)} className="rounded border-zinc-700 bg-zinc-800 text-brand-red focus:ring-brand-red" />
+              <span className="text-sm">Imprimir 2 copias por hoja (Remito)</span>
+            </label>
             <button 
               onClick={handleDownloadPdf}
               disabled={loadingPdf}
@@ -755,6 +760,8 @@ function CargarPagoModal({
   const [loadingSubmit, setLoadingSubmit] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
 
+  const [selectedVentaIds, setSelectedVentaIds] = useState<number[]>([]);
+
   useEffect(() => {
     fetch(`${API_URL}/clientes/${client.id}/ventas?only_debt=true`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
@@ -764,23 +771,50 @@ function CargarPagoModal({
       .finally(() => setLoading(false));
   }, [client.id, token]);
 
+  const toggleVenta = (id: number) => {
+    setSelectedVentaIds(prev => 
+      prev.includes(id) ? prev.filter(vId => vId !== id) : [...prev, id]
+    );
+  };
+
+  useEffect(() => {
+    if (selectedVentaIds.length > 0) {
+      const sum = ventas.filter(v => selectedVentaIds.includes(v.id)).reduce((s, v) => s + v.saldo, 0);
+      setMonto(sum.toString());
+    } else {
+      setMonto("");
+    }
+  }, [selectedVentaIds, ventas]);
+
   const distribution = useMemo(() => {
     const amountNum = parsePaymentInput(monto);
     let remaining = amountNum;
-    return ventas.map(v => {
+    const targetVentas = selectedVentaIds.length > 0 
+      ? ventas.filter(v => selectedVentaIds.includes(v.id))
+      : ventas;
+      
+    const sortedForDist = [...targetVentas].sort((a, b) => a.id - b.id);
+    const distResult: any[] = [];
+    
+    sortedForDist.forEach(v => {
       const allocated = Math.min(v.saldo, remaining);
       remaining -= allocated;
-      return {
+      distResult.push({
         ...v,
         allocated,
         newSaldo: Math.round((v.saldo - allocated) * 100) / 100
-      };
+      });
     });
-  }, [ventas, monto]);
+    
+    return distResult;
+  }, [ventas, monto, selectedVentaIds]);
 
   const totalSaldos = useMemo(() => {
-    return ventas.reduce((s, v) => s + v.saldo, 0);
-  }, [ventas]);
+    const targetVentas = selectedVentaIds.length > 0 
+      ? ventas.filter(v => selectedVentaIds.includes(v.id))
+      : ventas;
+    return targetVentas.reduce((s, v) => s + v.saldo, 0);
+  }, [ventas, selectedVentaIds]);
 
   const newTotalBalance = useMemo(() => {
     const amountNum = parsePaymentInput(monto);
@@ -831,7 +865,11 @@ function CargarPagoModal({
       const res = await fetch(`${API_URL}/clientes/${client.id}/pagar`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ monto: amountNum, descripcion }),
+        body: JSON.stringify({ 
+          monto: amountNum, 
+          descripcion,
+          ventas_seleccionadas: selectedVentaIds.length > 0 ? selectedVentaIds : undefined
+        }),
       });
       if (res.ok) {
         onSuccess();
@@ -937,23 +975,35 @@ function CargarPagoModal({
               <div>
                 <label className="text-xs text-zinc-400 uppercase tracking-widest mb-2 block">Distribución de pago estimada (FIFO)</label>
                 <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                  {distribution.map(v => (
-                    <div key={v.id} className="rounded-xl border border-white/5 bg-black/20 p-3 text-xs flex justify-between items-center">
-                      <div>
+                  {ventas.map(v => {
+                    const isSelected = selectedVentaIds.includes(v.id);
+                    const distVenta = distribution.find(d => d.id === v.id);
+                    const isTargeted = selectedVentaIds.length === 0 || isSelected;
+                    return (
+                    <div key={v.id} className={`rounded-xl border ${isSelected ? 'border-brand-red bg-brand-red/10' : 'border-white/5 bg-black/20'} p-3 text-xs flex gap-3 items-center transition-colors`}>
+                      <input 
+                        type="checkbox" 
+                        checked={isSelected}
+                        onChange={() => toggleVenta(v.id)}
+                        className="rounded border-zinc-700 bg-zinc-800 text-brand-red focus:ring-brand-red w-5 h-5 cursor-pointer shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
                         <p className="font-semibold text-zinc-300">{v.fecha}</p>
                         <p className="text-zinc-500 truncate max-w-[180px]">{v.items}</p>
                         <p className="text-[10px] text-zinc-400 mt-1">Saldo original: ${v.saldo.toLocaleString('es-AR')}</p>
                       </div>
-                      <div className="text-right">
-                        {v.allocated > 0 && (
-                          <p className="font-semibold text-emerald-400">-${v.allocated.toLocaleString('es-AR')}</p>
+                      {isTargeted && distVenta && (
+                      <div className="text-right shrink-0">
+                        {distVenta.allocated > 0 && (
+                          <p className="font-semibold text-emerald-400">-${distVenta.allocated.toLocaleString('es-AR')}</p>
                         )}
-                        <p className={`font-bold mt-1 ${v.newSaldo === 0 ? "text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded inline-block" : "text-zinc-300"}`}>
-                          {v.newSaldo === 0 ? "Saldado ✓" : `Restan: $${v.newSaldo.toLocaleString('es-AR')}`}
+                        <p className={`font-bold mt-1 ${distVenta.newSaldo === 0 ? "text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded inline-block" : "text-zinc-300"}`}>
+                          {distVenta.newSaldo === 0 ? "Saldado ✓" : `Restan: $${distVenta.newSaldo.toLocaleString('es-AR')}`}
                         </p>
                       </div>
+                      )}
                     </div>
-                  ))}
+                  )})}
                 </div>
               </div>
             ) : (
@@ -1389,6 +1439,7 @@ export default function BakeryDriverApp() {
   const [selectedCaja, setSelectedCaja] = useState<any | null>(null); // caja detail modal
   const [cajaSales, setCajaSales] = useState<any[]>([]);
   const [loadingCajaSales, setLoadingCajaSales] = useState(false);
+  const [imprimirDoble, setImprimirDoble] = useState(false);
   const [historyHasMore, setHistoryHasMore] = useState(false);
   const historyLoaderRef = useRef<HTMLDivElement | null>(null);
 
@@ -1443,6 +1494,38 @@ export default function BakeryDriverApp() {
     }, 400);
     return () => clearTimeout(delayDebounceFn);
   }, [token, user, historyFilterType, historyDate, historyStartDate, historyEndDate, historyMonthYear, historyRefresh, historyPage, historySearch, historyType, historyFormaPago]);
+  const [cajaFormaPago, setCajaFormaPago] = useState<string>("");
+
+  useEffect(() => {
+    if (!selectedCaja || !token) {
+      setCajaSales([]);
+      return;
+    }
+    const fetchCajaSales = async () => {
+      setLoadingCajaSales(true);
+      try {
+        let queryParams = `filter_type=${historyFilterType}&search=${historySearch}&tipo=${historyType}&user_id=${selectedCaja.user_id}`;
+        if (cajaFormaPago) queryParams += `&forma_pago=${cajaFormaPago}`;
+        if (historyFilterType === 'range') {
+          queryParams += `&start_date=${historyStartDate}&end_date=${historyEndDate}`;
+        } else if (historyFilterType === 'month') {
+          const [year, month] = historyMonthYear.split("-");
+          queryParams += `&month=${month}&year=${year}`;
+        } else {
+          queryParams += `&date=${historyDate}`;
+        }
+        const res = await fetch(`${API_URL}/mis-ventas?${queryParams}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setCajaSales(data.paginator.data || []);
+        }
+      } catch (e) {}
+      setLoadingCajaSales(false);
+    };
+    fetchCajaSales();
+  }, [selectedCaja, token, historyFilterType, historyDate, historyStartDate, historyEndDate, historyMonthYear, historySearch, historyType, cajaFormaPago]);
 
   // Reset to page 1 when filters change (not page itself)
   useEffect(() => {
@@ -1459,39 +1542,6 @@ export default function BakeryDriverApp() {
     obs.observe(historyLoaderRef.current);
     return () => obs.disconnect();
   }, [historyHasMore, loadingHistory]);
-
-  useEffect(() => {
-    if (!selectedCaja || !token) {
-      setCajaSales([]);
-      return;
-    }
-    const fetchCajaSales = async () => {
-      setLoadingCajaSales(true);
-      try {
-        let queryParams = `filter_type=${historyFilterType}&search=${historySearch}&tipo=${historyType}&user_id=${selectedCaja.user_id}`;
-        if (historyFilterType === 'range') {
-          queryParams += `&start_date=${historyStartDate}&end_date=${historyEndDate}`;
-        } else if (historyFilterType === 'month') {
-          const [year, month] = historyMonthYear.split("-");
-          queryParams += `&month=${month}&year=${year}`;
-        } else {
-          queryParams += `&date=${historyDate}`;
-        }
-        const res = await fetch(`${API_URL}/mis-ventas?${queryParams}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setCajaSales(data.paginator.data || []);
-        }
-      } catch (e) {
-        console.error(e);
-      }
-      setLoadingCajaSales(false);
-    };
-    fetchCajaSales();
-  }, [selectedCaja, token, historyFilterType, historyDate, historyStartDate, historyEndDate, historyMonthYear, historySearch, historyType]);
-
 
   const observerRef = useRef<IntersectionObserver | null>(null);
   const lastStockElementRef = useCallback((node: any) => {
@@ -2525,6 +2575,10 @@ export default function BakeryDriverApp() {
                               <span className="text-zinc-400">📝 Pendiente (Fiado)</span>
                               <span className="font-bold text-red-400">${caja.total_saldo.toLocaleString('es-AR')}</span>
                             </div>
+                            <div className="flex justify-between items-center text-xs pt-2 mt-2 border-t border-white/5">
+                              <span className="text-zinc-500">🛒 Total Vendido</span>
+                              <span className="font-semibold text-zinc-300">${caja.total_facturado.toLocaleString('es-AR')}</span>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -3008,22 +3062,28 @@ export default function BakeryDriverApp() {
               )}
             </div>
 
-            <button
-              onClick={async () => {
-                try {
-                  const res = await fetch(`${API_URL}/pedidos/${selectedVenta.id}/comprobante`, { headers: { Authorization: `Bearer ${token}` } });
-                  if (res.ok) {
-                    const blob = await res.blob();
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement("a"); a.href = url; a.download = `Comprobante_${selectedVenta.id}.pdf`;
-                    document.body.appendChild(a); a.click(); document.body.removeChild(a); window.URL.revokeObjectURL(url);
-                  } else alert("Error al descargar");
-                } catch { alert("Error de conexi\u00f3n"); }
-              }}
-              className="mt-4 w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-brand-red text-white font-bold text-sm hover:bg-red-600 transition-colors active:scale-95"
-            >
-              <Download className="w-4 h-4" /> Descargar Comprobante
-            </button>
+            <div className="flex flex-col gap-3 mt-4">
+              <label className="flex items-center justify-center gap-2 cursor-pointer text-zinc-300">
+                <input type="checkbox" checked={imprimirDoble} onChange={(e) => setImprimirDoble(e.target.checked)} className="rounded border-zinc-700 bg-zinc-800 text-brand-red focus:ring-brand-red" />
+                <span className="text-sm">Imprimir 2 copias por hoja (Remito)</span>
+              </label>
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await fetch(`${API_URL}/pedidos/${selectedVenta.id}/comprobante?doble=${imprimirDoble}`, { headers: { Authorization: `Bearer ${token}` } });
+                    if (res.ok) {
+                      const blob = await res.blob();
+                      const url = window.URL.createObjectURL(blob);
+                      const a = document.createElement("a"); a.href = url; a.download = `Comprobante_${selectedVenta.id}.pdf`;
+                      document.body.appendChild(a); a.click(); document.body.removeChild(a); window.URL.revokeObjectURL(url);
+                    } else alert("Error al descargar");
+                  } catch { alert("Error de conexi\u00f3n"); }
+                }}
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-brand-red text-white font-bold text-sm hover:bg-red-600 transition-colors active:scale-95"
+              >
+                <Download className="w-4 h-4" /> Descargar Comprobante
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -3046,18 +3106,28 @@ export default function BakeryDriverApp() {
 
             {/* Summary Cards */}
             <div className="grid grid-cols-3 gap-2 mb-6">
-              <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3 text-center">
+              <div 
+                onClick={() => setCajaFormaPago(cajaFormaPago === 'efectivo' ? '' : 'efectivo')}
+                className={`border rounded-xl p-3 text-center cursor-pointer transition-all ${cajaFormaPago === 'efectivo' ? 'bg-emerald-500/20 border-emerald-400 ring-1 ring-emerald-400' : 'bg-emerald-500/10 border-emerald-500/20 hover:bg-emerald-500/20'}`}>
                 <span className="text-[10px] text-emerald-400/80 uppercase block font-semibold mb-1">Efectivo</span>
                 <span className="text-sm font-bold text-emerald-400">${selectedCaja.total_efectivo.toLocaleString('es-AR')}</span>
               </div>
-              <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 text-center">
+              <div 
+                onClick={() => setCajaFormaPago(cajaFormaPago === 'transferencia' ? '' : 'transferencia')}
+                className={`border rounded-xl p-3 text-center cursor-pointer transition-all ${cajaFormaPago === 'transferencia' ? 'bg-blue-500/20 border-blue-400 ring-1 ring-blue-400' : 'bg-blue-500/10 border-blue-500/20 hover:bg-blue-500/20'}`}>
                 <span className="text-[10px] text-blue-400/80 uppercase block font-semibold mb-1">Transf.</span>
                 <span className="text-sm font-bold text-blue-400">${selectedCaja.total_transferencia.toLocaleString('es-AR')}</span>
               </div>
-              <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 text-center">
+              <div 
+                onClick={() => setCajaFormaPago(cajaFormaPago === 'saldo' ? '' : 'saldo')}
+                className={`border rounded-xl p-3 text-center cursor-pointer transition-all ${cajaFormaPago === 'saldo' ? 'bg-red-500/20 border-red-400 ring-1 ring-red-400' : 'bg-red-500/10 border-red-500/20 hover:bg-red-500/20'}`}>
                 <span className="text-[10px] text-red-400/80 uppercase block font-semibold mb-1">Fiado</span>
                 <span className="text-sm font-bold text-red-400">${selectedCaja.total_saldo.toLocaleString('es-AR')}</span>
               </div>
+            </div>
+            <div className="mb-6 bg-white/5 border border-white/10 rounded-xl p-3 flex justify-between items-center text-sm">
+              <span className="text-zinc-400 uppercase tracking-widest text-[10px] font-bold">🛒 Total Vendido (Facturado)</span>
+              <span className="font-bold text-zinc-300">${selectedCaja.total_facturado.toLocaleString('es-AR')}</span>
             </div>
 
             {/* Sales List Title */}
