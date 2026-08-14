@@ -2166,6 +2166,49 @@ export default function BakeryDriverApp() {
                           title="Eliminar pedido">
                           <Trash2 className="h-4 w-4" />
                         </button>
+                        <div className="relative group">
+                          <button
+                            className="flex items-center justify-center rounded-xl bg-blue-500/10 border border-blue-500/20 px-3 py-2.5 hover:bg-blue-500/20 active:scale-95 text-blue-400"
+                            title="Descargar remito">
+                            <Download className="h-4 w-4" />
+                          </button>
+                          <div className="absolute bottom-full right-0 mb-2 hidden group-focus-within:flex flex-col bg-zinc-900 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-20 min-w-[160px]">
+                            <button
+                              onClick={async () => {
+                                try {
+                                  const res = await fetch(`${API_URL}/pedidos/${delivery.id}/comprobante?doble=false`, { headers: { Authorization: `Bearer ${token}` } });
+                                  if (res.ok) {
+                                    const blob = await res.blob();
+                                    const url = window.URL.createObjectURL(blob);
+                                    const a = document.createElement("a");
+                                    a.href = url; a.download = `Remito_${delivery.id}.pdf`;
+                                    document.body.appendChild(a); a.click(); a.remove();
+                                    window.URL.revokeObjectURL(url);
+                                  } else { alert("Error al descargar"); }
+                                } catch { alert("Error de conexión"); }
+                              }}
+                              className="px-4 py-2.5 text-sm text-left hover:bg-white/10 text-zinc-300 transition-colors">
+                              📄 Remito Simple
+                            </button>
+                            <button
+                              onClick={async () => {
+                                try {
+                                  const res = await fetch(`${API_URL}/pedidos/${delivery.id}/comprobante?doble=true`, { headers: { Authorization: `Bearer ${token}` } });
+                                  if (res.ok) {
+                                    const blob = await res.blob();
+                                    const url = window.URL.createObjectURL(blob);
+                                    const a = document.createElement("a");
+                                    a.href = url; a.download = `Remito_Doble_${delivery.id}.pdf`;
+                                    document.body.appendChild(a); a.click(); a.remove();
+                                    window.URL.revokeObjectURL(url);
+                                  } else { alert("Error al descargar"); }
+                                } catch { alert("Error de conexión"); }
+                              }}
+                              className="px-4 py-2.5 text-sm text-left hover:bg-white/10 text-zinc-300 border-t border-white/5 transition-colors">
+                              📄📄 Remito Doble
+                            </button>
+                          </div>
+                        </div>
                         <button onClick={() => handleEditarPedido(delivery)}
                           className="flex items-center gap-1 rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm font-semibold hover:bg-white/10 active:scale-95 text-zinc-300">
                           Editar
@@ -2641,31 +2684,50 @@ export default function BakeryDriverApp() {
                             <div className="flex-1 min-w-0 mr-2">
                               <div className="flex items-center justify-between gap-2">
                                 <p className="text-sm font-semibold truncate">{v.customer}</p>
-                                <button
-                                  onClick={async (e) => {
-                                    e.stopPropagation();
-                                    try {
-                                      const res = await fetch(`${API_URL}/pedidos/${v.id}/comprobante`, {
-                                        headers: { Authorization: `Bearer ${token}` }
-                                      });
-                                      if (res.ok) {
-                                        const blob = await res.blob();
-                                        const url = window.URL.createObjectURL(blob);
-                                        const a = document.createElement("a");
-                                        a.href = url;
-                                        a.download = `Comprobante_${v.id}.pdf`;
-                                        document.body.appendChild(a);
-                                        a.click();
-                                        document.body.removeChild(a);
-                                        window.URL.revokeObjectURL(url);
-                                      } else alert("Error al descargar");
-                                    } catch { alert("Error de conexión"); }
-                                  }}
-                                  className="p-1.5 bg-white/10 rounded-md hover:bg-white/20 transition-colors shrink-0"
-                                  title="Descargar Comprobante"
-                                >
-                                  <Download className="w-3.5 h-3.5 text-zinc-300" />
-                                </button>
+                                <div className="relative group/dl" onClick={e => e.stopPropagation()}>
+                                  <button
+                                    className="p-1.5 bg-white/10 rounded-md hover:bg-white/20 transition-colors shrink-0"
+                                    title="Descargar Comprobante"
+                                  >
+                                    <Download className="w-3.5 h-3.5 text-zinc-300" />
+                                  </button>
+                                  <div className="absolute bottom-full right-0 mb-2 hidden group-focus-within/dl:flex flex-col bg-zinc-900 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-20 min-w-[155px]">
+                                    <button
+                                      onClick={async () => {
+                                        try {
+                                          const res = await fetch(`${API_URL}/pedidos/${v.id}/comprobante?doble=false`, { headers: { Authorization: `Bearer ${token}` } });
+                                          if (res.ok) {
+                                            const blob = await res.blob();
+                                            const url = window.URL.createObjectURL(blob);
+                                            const a = document.createElement("a");
+                                            a.href = url; a.download = `Remito_${v.id}.pdf`;
+                                            document.body.appendChild(a); a.click(); a.remove();
+                                            window.URL.revokeObjectURL(url);
+                                          } else alert("Error al descargar");
+                                        } catch { alert("Error de conexión"); }
+                                      }}
+                                      className="px-3 py-2 text-xs text-left hover:bg-white/10 text-zinc-300 transition-colors">
+                                      📄 Simple
+                                    </button>
+                                    <button
+                                      onClick={async () => {
+                                        try {
+                                          const res = await fetch(`${API_URL}/pedidos/${v.id}/comprobante?doble=true`, { headers: { Authorization: `Bearer ${token}` } });
+                                          if (res.ok) {
+                                            const blob = await res.blob();
+                                            const url = window.URL.createObjectURL(blob);
+                                            const a = document.createElement("a");
+                                            a.href = url; a.download = `Remito_Doble_${v.id}.pdf`;
+                                            document.body.appendChild(a); a.click(); a.remove();
+                                            window.URL.revokeObjectURL(url);
+                                          } else alert("Error al descargar");
+                                        } catch { alert("Error de conexión"); }
+                                      }}
+                                      className="px-3 py-2 text-xs text-left hover:bg-white/10 text-zinc-300 border-t border-white/5 transition-colors">
+                                      📄📄 Doble
+                                    </button>
+                                  </div>
+                                </div>
                               </div>
                               <p className="text-xs text-zinc-400 mt-0.5">
                                 {isCobro
