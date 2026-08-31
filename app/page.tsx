@@ -6,7 +6,7 @@ import {
   CircleDollarSign, ClipboardList, ChevronRight, LogOut,
   User as UserIcon, X, Check, Calendar, CheckCircle2,
   CreditCard, Banknote, Clock, Receipt, ArrowLeft,
-  ChevronDown, AlertCircle, RefreshCw, Trash2, PieChart as PieChartIcon, BarChart3, Edit2, Download
+  ChevronDown, AlertCircle, RefreshCw, Trash2, PieChart as PieChartIcon, BarChart3, Edit2, Download, Warehouse
 } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 
@@ -72,7 +72,7 @@ const parsePaymentInput = (formatted: string): number => {
   return Number(clean) || 0;
 };
 
-interface Product  { id: number; name: string; price: number; quantity: number; sold_qty?: number; stock_local?: number; stock_vehiculo1?: number; stock_vehiculo2?: number; descripcion?: string; codigo?: string; estado?: string; idcategoria?: number; precio_unitario?: number; precio_reparto?: number; precio_bar?: number; disponible_reparto?: number; precios_especiales?: any[]; }
+interface Product  { id: number; name: string; price: number; quantity: number; sold_qty?: number; reserved_qty?: number; stock_local?: number; stock_vehiculo1?: number; stock_vehiculo2?: number; descripcion?: string; codigo?: string; estado?: string; idcategoria?: number; precio_unitario?: number; precio_reparto?: number; precio_bar?: number; disponible_reparto?: number; precios_especiales?: any[]; unidad_medida?: string; }
 interface Client   { id: number; name: string; address: string; balance: number; }
 interface Delivery { id: number; customer: string; status: string; items: string; raw_items?: {id?: number, name: string, qty: number}[]; total: string; total_raw: number; address: string; advance?: number; fecha_entrega?: string | null; }
 interface SaleItem { id: number; name: string; price: number; quantity: number; }
@@ -1039,7 +1039,7 @@ function ProductEditModal({ open, product, categorias, clients, token, onClose, 
     nombre: '', idcategoria: '', codigo: '', descripcion: '',
     precio_unitario: 0, precio_reparto: 0, precio_bar: 0,
     stock_local: 0, stock_vehiculo1: 0, stock_vehiculo2: 0,
-    estado: 'activo', disponible_reparto: 1,
+    estado: 'activo', disponible_reparto: 1, unidad_medida: 'unidades'
   });
   const [promos, setPromos] = useState<any[]>([]);
   const [newPromo, setNewPromo] = useState({ idcliente: '', precio: '', fecha_desde: '', fecha_hasta: '' });
@@ -1059,6 +1059,7 @@ function ProductEditModal({ open, product, categorias, clients, token, onClose, 
         stock_vehiculo2: product.stock_vehiculo2 || 0,
         estado: product.estado || 'activo',
         disponible_reparto: product.disponible_reparto ? 1 : 0,
+        unidad_medida: product.unidad_medida || 'unidades',
       });
       setPromos(product.precios_especiales || []);
       setTab("general");
@@ -1169,9 +1170,18 @@ function ProductEditModal({ open, product, categorias, clients, token, onClose, 
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-zinc-400 mb-1">Código de Barras</label>
-                  <input type="text" value={formData.codigo} onChange={e => setFormData({...formData, codigo: e.target.value})} className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm focus:border-brand-red outline-none" />
+                  <label className="block text-xs font-semibold text-zinc-400 mb-1">Unidad de Medida</label>
+                  <select value={formData.unidad_medida} onChange={e => setFormData({...formData, unidad_medida: e.target.value})} className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm focus:border-brand-red outline-none appearance-none">
+                    <option value="unidades">Unidades (un)</option>
+                    <option value="kg">Kilogramos (kg)</option>
+                    <option value="gr">Gramos (gr)</option>
+                    <option value="litros">Litros (l)</option>
+                  </select>
                 </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-zinc-400 mb-1">Código de Barras</label>
+                <input type="text" value={formData.codigo} onChange={e => setFormData({...formData, codigo: e.target.value})} className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm focus:border-brand-red outline-none" />
               </div>
               <div>
                 <label className="block text-xs font-semibold text-zinc-400 mb-1">Descripción</label>
@@ -1181,18 +1191,24 @@ function ProductEditModal({ open, product, categorias, clients, token, onClose, 
           )}
 
           {tab === "inventario" && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
-                <label className="block text-xs font-semibold text-brand-yellow mb-2 uppercase tracking-wider text-center">Stock Local</label>
-                <input type="number" value={formData.stock_local} onChange={e => setFormData({...formData, stock_local: Number(e.target.value)})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-lg font-bold focus:border-brand-red outline-none text-center" />
+            <div className="space-y-4">
+              <div className="bg-brand-red/10 border border-brand-red/20 rounded-xl p-3 text-center">
+                <p className="text-brand-yellow text-xs font-semibold uppercase tracking-wider">Gestión de Stock Centralizada</p>
+                <p className="text-zinc-400 text-xs mt-1">El stock ya no se puede editar manualmente desde aquí. Toda carga, reserva o distribución debe realizarse desde la pestaña "Depósito".</p>
               </div>
-              <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
-                <label className="block text-xs font-semibold text-emerald-400 mb-2 uppercase tracking-wider text-center">Vehículo 1</label>
-                <input type="number" value={formData.stock_vehiculo1} onChange={e => setFormData({...formData, stock_vehiculo1: Number(e.target.value)})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-lg font-bold focus:border-emerald-500 outline-none text-center" />
-              </div>
-              <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
-                <label className="block text-xs font-semibold text-blue-400 mb-2 uppercase tracking-wider text-center">Vehículo 2</label>
-                <input type="number" value={formData.stock_vehiculo2} onChange={e => setFormData({...formData, stock_vehiculo2: Number(e.target.value)})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-lg font-bold focus:border-blue-500 outline-none text-center" />
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-white/5 p-4 rounded-2xl border border-white/10 opacity-70">
+                  <label className="block text-xs font-semibold text-brand-yellow mb-2 uppercase tracking-wider text-center">Stock Local (Panadería)</label>
+                  <div className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-lg font-bold text-center text-zinc-300">{formData.stock_local}</div>
+                </div>
+                <div className="bg-white/5 p-4 rounded-2xl border border-white/10 opacity-70">
+                  <label className="block text-xs font-semibold text-emerald-400 mb-2 uppercase tracking-wider text-center">Vehículo 1</label>
+                  <div className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-lg font-bold text-center text-zinc-300">{formData.stock_vehiculo1}</div>
+                </div>
+                <div className="bg-white/5 p-4 rounded-2xl border border-white/10 opacity-70">
+                  <label className="block text-xs font-semibold text-blue-400 mb-2 uppercase tracking-wider text-center">Vehículo 2</label>
+                  <div className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-lg font-bold text-center text-zinc-300">{formData.stock_vehiculo2}</div>
+                </div>
               </div>
             </div>
           )}
@@ -1443,9 +1459,49 @@ export default function BakeryDriverApp() {
   const [historyHasMore, setHistoryHasMore] = useState(false);
   const historyLoaderRef = useRef<HTMLDivElement | null>(null);
 
+  // Driver Reservations
+  const [misReservas, setMisReservas] = useState<any[]>([]);
+  const [reservaModalItem, setReservaModalItem] = useState<Product | null>(null);
+
+  // ── Depósito state ──────────────────────────────────────────────────────────
+  const [depositoArticulos, setDepositoArticulos] = useState<any[]>([]);
+  const [depositoMP, setDepositoMP] = useState<any[]>([]);
+  const [depositoReservasPendientes, setDepositoReservasPendientes] = useState<any[]>([]);
+  const [depositoMovimientos, setDepositoMovimientos] = useState<any[]>([]);
+  const [depositoHistoryPage, setDepositoHistoryPage] = useState(1);
+  const [depositoHistorySearch, setDepositoHistorySearch] = useState("");
+  const [depositoHistoryDate, setDepositoHistoryDate] = useState("");
+  const [depositoHistoryTotalPages, setDepositoHistoryTotalPages] = useState(1);
+  const [loadingDeposito, setLoadingDeposito] = useState(false);
+  const [depositoSubTab, setDepositoSubTab] = useState<'stock' | 'mp' | 'historial' | 'reservas'>('stock');
+  const [depositoModal, setDepositoModal] = useState<null | 'entrada' | 'distribuir' | 'salida_mp' | 'devolucion'>(null);
+  const [depositoModalItem, setDepositoModalItem] = useState<any>(null);
+  const [depositoSearchStock, setDepositoSearchStock] = useState("");
+  const [depositoPageStock, setDepositoPageStock] = useState(1);
+  const [depositoSearchMP, setDepositoSearchMP] = useState("");
+  const [depositoPageMP, setDepositoPageMP] = useState(1);
+
+  const filteredDepositoArticulos = useMemo(() => {
+    let list = depositoArticulos;
+    if (depositoSearchStock.trim()) {
+      list = list.filter(a => a.nombre.toLowerCase().includes(depositoSearchStock.toLowerCase()));
+    }
+    // Ordenar por los mas usados (mayor sold_qty)
+    list = [...list].sort((a, b) => (b.sold_qty || 0) - (a.sold_qty || 0));
+    return list;
+  }, [depositoArticulos, depositoSearchStock]);
+
+  const filteredDepositoMP = useMemo(() => {
+    let list = depositoMP;
+    if (depositoSearchMP.trim()) {
+      list = list.filter(mp => mp.nombre.toLowerCase().includes(depositoSearchMP.toLowerCase()));
+    }
+    return list;
+  }, [depositoMP, depositoSearchMP]);
+
+
   // Only payment filter goes to server; caja opens a modal (no server filter)
   const historyFormaPago = historyActiveFilter?.type === 'payment' ? (historyActiveFilter.value as string) : '';
-
 
   useEffect(() => {
     if (!token || !user) return;
@@ -1578,10 +1634,16 @@ export default function BakeryDriverApp() {
       } catch (e) {}
       setLoadingAdminStock(false);
     };
-    const delayDebounceFn = setTimeout(() => {
+
+    // Si la página es > 1, no queremos debounce porque rompería el infinite scroll saltándose páginas
+    if (adminStockPage > 1) {
       fetchAdminStock();
-    }, 400);
-    return () => clearTimeout(delayDebounceFn);
+    } else {
+      const delayDebounceFn = setTimeout(() => {
+        fetchAdminStock();
+      }, 400);
+      return () => clearTimeout(delayDebounceFn);
+    }
   }, [token, user, adminStockPage, adminStockSearch, adminStockRefresh]);
 
   // POS search and sorting state
@@ -1724,33 +1786,82 @@ export default function BakeryDriverApp() {
     } catch { logout(); }
   };
 
-  const fetchAllData = useCallback(async (authToken: string) => {
-    setLoading(true);
+  const fetchAllData = useCallback(async (authToken: string, full: boolean = true) => {
+    // Si no es full, no bloqueamos toda la UI con setLoading(true) (asumiendo que loading solo se usa en login)
+    if (full) setLoading(true);
     const headers = { Authorization: `Bearer ${authToken}` };
     try {
-      const [stockRes, pedRes, cliRes, usrRes] = await Promise.all([
+      const [stockRes, pedRes, cliRes] = await Promise.all([
         fetch(`${API_URL}/stock`, { headers }),
         fetch(`${API_URL}/pedidos`, { headers }),
         fetch(`${API_URL}/clientes`, { headers }),
-        fetch(`${API_URL}/user`, { headers }),
       ]);
       if (stockRes.ok) setProducts(await stockRes.json());
       if (pedRes.ok)   setDeliveries(await pedRes.json());
       if (cliRes.ok)   setClients(await cliRes.json());
       
-      if (usrRes.ok) {
-        const u = await usrRes.json();
-        if (u.roles?.some((r: string) => r.toLowerCase() === 'admin')) {
-          const catRes = await fetch(`${API_URL}/categorias`, { headers });
-          if (catRes.ok) setCategorias(await catRes.json());
-          const mayRes = await fetch(`${API_URL}/admin/users/mayoristas`, { headers });
-          if (mayRes.ok) setAdminUsers(await mayRes.json());
+      if (full) {
+        const usrRes = await fetch(`${API_URL}/user`, { headers });
+        if (usrRes.ok) {
+          const u = await usrRes.json();
+          if (u.roles?.some((r: string) => r.toLowerCase() === 'admin')) {
+            const catRes = await fetch(`${API_URL}/categorias`, { headers });
+            if (catRes.ok) setCategorias(await catRes.json());
+            const mayRes = await fetch(`${API_URL}/admin/users/mayoristas`, { headers });
+            if (mayRes.ok) setAdminUsers(await mayRes.json());
+          } else {
+            const reservasRes = await fetch(`${API_URL}/deposito/mis-reservas`, { headers });
+            if (reservasRes.ok) setMisReservas(await reservasRes.json());
+          }
+        }
+      } else {
+        // Even on partial refresh, update driver reservations
+        if (!user?.roles?.some((r: string) => r.toLowerCase() === 'admin')) {
+          const reservasRes = await fetch(`${API_URL}/deposito/mis-reservas`, { headers });
+          if (reservasRes.ok) setMisReservas(await reservasRes.json());
         }
       }
       setHistoryRefresh(prev => prev + 1);
     } catch (err) { console.error(err); }
-    finally { setLoading(false); }
-  }, []);
+    finally { if (full) setLoading(false); }
+  }, [user]);
+
+  const fetchDeposito = useCallback(async () => {
+    if (!token) return;
+    setLoadingDeposito(true);
+    try {
+      const res = await fetch(`${API_URL}/deposito`, { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const data = await res.json();
+        setDepositoArticulos(data.articulos ?? []);
+        setDepositoMP(data.materias_primas ?? []);
+        setDepositoReservasPendientes(data.reservas_pendientes ?? []);
+      }
+    } catch { console.error('Error fetching deposito'); }
+    finally { setLoadingDeposito(false); }
+  }, [token]);
+
+  const fetchDepositoMovimientos = useCallback(async () => {
+    if (!token) return;
+    try {
+      const params = new URLSearchParams({ page: depositoHistoryPage.toString() });
+      if (depositoHistorySearch) params.append('search', depositoHistorySearch);
+      if (depositoHistoryDate) params.append('fecha', depositoHistoryDate);
+      
+      const res = await fetch(`${API_URL}/deposito/movimientos?${params.toString()}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const data = await res.json();
+        setDepositoMovimientos(data.data ?? []);
+        setDepositoHistoryTotalPages(data.last_page ?? 1);
+      }
+    } catch { console.error('Error fetching movimientos deposito'); }
+  }, [token, depositoHistoryPage, depositoHistorySearch, depositoHistoryDate]);
+
+  useEffect(() => {
+    if (depositoSubTab === 'historial') {
+      fetchDepositoMovimientos();
+    }
+  }, [fetchDepositoMovimientos, depositoSubTab]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1800,11 +1911,16 @@ export default function BakeryDriverApp() {
 
   const isAdmin = user?.roles?.some((r: string) => r.toLowerCase() === 'admin');
   const isVendedor = user?.roles?.some((r: string) => r.toLowerCase() === 'vendedor');
+  const isVehiculo1 = user?.roles?.some((r: string) => r.toLowerCase() === 'vehiculo1');
+  const isVehiculo2 = user?.roles?.some((r: string) => r.toLowerCase() === 'vehiculo2');
 
+  const [loadingActionId, setLoadingActionId] = useState<number | null>(null);
 
 
   // Cargar pedido para checkout
   const handleEntregarPedido = async (delivery: Delivery) => {
+    if (loadingActionId) return;
+    setLoadingActionId(delivery.id);
     try {
       const res = await fetch(`${API_URL}/pedidos/${delivery.id}`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -1821,10 +1937,13 @@ export default function BakeryDriverApp() {
         setCheckoutOpen(true);
       }
     } catch { alert("Error al cargar pedido"); }
+    finally { setLoadingActionId(null); }
   };
 
   // Cargar pedido para edición en el POS
   const handleEditarPedido = async (delivery: Delivery) => {
+    if (loadingActionId) return;
+    setLoadingActionId(delivery.id);
     try {
       const res = await fetch(`${API_URL}/pedidos/${delivery.id}`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -1852,29 +1971,31 @@ export default function BakeryDriverApp() {
       }
     } catch {
       alert("Error al cargar pedido para edición");
-    }
+    } finally { setLoadingActionId(null); }
   };
 
   // Cancelar/Eliminar pedido
   const handleCancelarPedido = async (delivery: Delivery) => {
+    if (loadingActionId) return;
     if (!confirm(`¿Estás seguro de que deseas eliminar el pedido de ${delivery.customer}?`)) {
       return;
     }
+    setLoadingActionId(delivery.id);
     try {
       const res = await fetch(`${API_URL}/pedidos/${delivery.id}/cancelar`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }
       });
       if (res.ok) {
-        alert("Pedido eliminado correctamente");
-        fetchAllData(token!);
+        // No mostramos alert aquí para que sea más rápido, el usuario ya ve que desaparece
+        fetchAllData(token!, false);
       } else {
         const err = await res.json();
         alert(err.message || "Error al eliminar el pedido");
       }
     } catch {
       alert("Error de conexión");
-    }
+    } finally { setLoadingActionId(null); }
   };
 
   const filteredClients    = clients.filter(c => c.name.toLowerCase().includes(search.toLowerCase()));
@@ -1960,6 +2081,12 @@ export default function BakeryDriverApp() {
               <button onClick={() => setActiveTab('clientes')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'clientes' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Users className="w-5 h-5"/> <span className="font-semibold text-sm">Clientes</span></button>
             )}
             <button onClick={() => setActiveTab('ventas')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'ventas' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Receipt className="w-5 h-5"/> <span className="font-semibold text-sm">Historial</span></button>
+            {isAdmin && (
+              <button onClick={() => { setActiveTab('deposito'); fetchDeposito(); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'deposito' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
+                <Warehouse className="w-5 h-5"/> <span className="font-semibold text-sm">Depósito</span>
+                {depositoReservasPendientes.length > 0 && <span className="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">{depositoReservasPendientes.length}</span>}
+              </button>
+            )}
           </nav>
           <div className="p-4 border-t border-white/10">
             <button onClick={logout} className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-all font-semibold text-sm"><LogOut className="w-4 h-4" /> Cerrar Sesión</button>
@@ -2161,14 +2288,14 @@ export default function BakeryDriverApp() {
                         <p className="text-lg font-bold">{delivery.total}</p>
                       </div>
                       <div className="flex gap-2">
-                        <button onClick={() => handleCancelarPedido(delivery)}
-                          className="flex items-center justify-center rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2.5 hover:bg-red-500/20 active:scale-95 text-red-400"
+                        <button onClick={() => handleCancelarPedido(delivery)} disabled={loadingActionId === delivery.id}
+                          className="flex items-center justify-center rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2.5 hover:bg-red-500/20 active:scale-95 text-red-400 disabled:opacity-50"
                           title="Eliminar pedido">
-                          <Trash2 className="h-4 w-4" />
+                          {loadingActionId === delivery.id ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                         </button>
                         <div className="relative group">
-                          <button
-                            className="flex items-center justify-center rounded-xl bg-blue-500/10 border border-blue-500/20 px-3 py-2.5 hover:bg-blue-500/20 active:scale-95 text-blue-400"
+                          <button disabled={loadingActionId === delivery.id}
+                            className="flex items-center justify-center rounded-xl bg-blue-500/10 border border-blue-500/20 px-3 py-2.5 hover:bg-blue-500/20 active:scale-95 text-blue-400 disabled:opacity-50"
                             title="Descargar remito">
                             <Download className="h-4 w-4" />
                           </button>
@@ -2209,13 +2336,17 @@ export default function BakeryDriverApp() {
                             </button>
                           </div>
                         </div>
-                        <button onClick={() => handleEditarPedido(delivery)}
-                          className="flex items-center gap-1 rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm font-semibold hover:bg-white/10 active:scale-95 text-zinc-300">
+                        <button onClick={() => handleEditarPedido(delivery)} disabled={loadingActionId === delivery.id}
+                          className="flex items-center gap-1 rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm font-semibold hover:bg-white/10 active:scale-95 text-zinc-300 disabled:opacity-50">
                           Editar
                         </button>
-                        <button onClick={() => handleEntregarPedido(delivery)}
-                          className="flex items-center gap-1 rounded-xl bg-brand-red px-4 py-2.5 text-sm font-semibold shadow-lg shadow-brand-red/20 active:scale-95">
-                          Cobrar <ChevronRight className="h-4 w-4" />
+                        <button onClick={() => handleEntregarPedido(delivery)} disabled={loadingActionId === delivery.id}
+                          className="flex items-center gap-1 rounded-xl bg-brand-red px-4 py-2.5 text-sm font-semibold shadow-lg shadow-brand-red/20 active:scale-95 disabled:opacity-50">
+                          {loadingActionId === delivery.id ? (
+                            <><RefreshCw className="h-4 w-4 animate-spin" /> Cargando...</>
+                          ) : (
+                            <>Cobrar <ChevronRight className="h-4 w-4" /></>
+                          )}
                         </button>
                       </div>
                     </div>
@@ -2337,20 +2468,99 @@ export default function BakeryDriverApp() {
                   )}
                 </>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                  {products.map(item => (
-                    <div key={item.id} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                      <div>
-                        <p className="text-sm font-semibold">{item.name}</p>
-                        <p className="text-xs text-zinc-400">Precio reparto: ${item.price}</p>
-                      </div>
-                      <div className={`rounded-xl px-3 py-1.5 text-sm font-bold ${item.quantity === 0 ? "bg-red-500/20 text-red-300" : "bg-brand-red/20 text-brand-yellow"}`}>
-                        {item.quantity} un.
+                <div className="space-y-6">
+                  {misReservas.length > 0 && (
+                    <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4">
+                      <h2 className="text-sm font-semibold text-red-400 mb-3">Tus Solicitudes Pendientes</h2>
+                      <div className="space-y-2">
+                        {misReservas.map(r => (
+                          <div key={r.id} className="flex justify-between items-center bg-black/20 rounded-xl p-2 px-3">
+                            <span className="text-sm font-medium text-white">{r.item_nombre}</span>
+                            <div className="flex items-center gap-3">
+                              <span className="text-sm font-bold text-red-300">{r.cantidad}</span>
+                              <button onClick={async () => {
+                                if (!confirm("¿Cancelar solicitud?")) return;
+                                try {
+                                  const res = await fetch(`${API_URL}/deposito/reservas/${r.id}/cancelar`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+                                  if (res.ok) fetchAllData(token!, false);
+                                } catch {}
+                              }} className="text-[10px] px-2 py-1 bg-red-500/20 text-red-200 rounded-lg hover:bg-red-500/30 transition-colors uppercase tracking-wider">Cancelar</button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  ))}
+                  )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                    {products.map(item => (
+                      <div key={item.id} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                        <div>
+                          <p className="text-sm font-semibold">{item.name}</p>
+                          <p className="text-xs text-zinc-400">Precio reparto: ${item.price}</p>
+                        </div>
+                        <div className="flex flex-col items-end gap-2">
+                          <div className={`rounded-xl px-3 py-1.5 text-sm font-bold flex flex-col items-end ${item.quantity === 0 ? "bg-red-500/20 text-red-300" : "bg-brand-red/20 text-brand-yellow"}`}>
+                            <span>{item.quantity} {!item.unidad_medida || item.unidad_medida === 'unidades' ? 'un.' : item.unidad_medida}</span>
+                            {(item.reserved_qty ?? 0) > 0 && (
+                              <span className="text-[10px] text-emerald-400 mt-0.5">+{item.reserved_qty} reservados</span>
+                            )}
+                          </div>
+                          <button onClick={() => setReservaModalItem(item)}
+                            className="text-[10px] uppercase tracking-wider bg-white/10 text-zinc-300 px-2 py-1 rounded-lg hover:bg-white/20 transition-colors border border-white/10">
+                            + Solicitar
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* ── Driver Reserva Modal ── */}
+          {reservaModalItem && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setReservaModalItem(null)} />
+              <div className="relative w-full max-w-sm rounded-3xl border border-white/10 bg-zinc-950 p-6 shadow-2xl">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-lg font-bold flex items-center gap-2"><Package className="w-5 h-5 text-brand-yellow" /> Solicitar Stock</h2>
+                  <button onClick={() => setReservaModalItem(null)} className="p-2 rounded-full bg-white/5 hover:bg-white/10 text-zinc-400 transition-colors">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  const fd = new FormData(e.target as HTMLFormElement);
+                  const vehiculo_solicitante = isVehiculo1 ? '1' : isVehiculo2 ? '2' : isAdmin ? '1' : '';
+                  try {
+                    const res = await fetch(`${API_URL}/deposito/reservar`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', Authorization: `Bearer ${token}` },
+                      body: JSON.stringify({ item_id: reservaModalItem.id, cantidad: parseFloat(fd.get('cantidad') as string), vehiculo_solicitante })
+                    });
+                    if (res.ok) {
+                      setReservaModalItem(null);
+                      fetchAllData(token!, false);
+                    } else {
+                      const data = await res.json();
+                      alert(data.message || 'Error al solicitar');
+                    }
+                  } catch { alert('Error de conexión'); }
+                }} className="space-y-4">
+                  <div className="bg-white/5 border border-white/10 rounded-xl p-3 text-sm text-center">
+                    Producto: <strong className="text-brand-yellow">{reservaModalItem.name}</strong>
+                  </div>
+                  <div>
+                    <label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">Cantidad a solicitar</label>
+                    <input name="cantidad" type="number" step="0.01" min="0.01" required autoFocus
+                      className="w-full h-12 rounded-xl bg-white/5 border border-white/10 px-4 text-white outline-none focus:border-brand-red text-center text-lg" />
+                  </div>
+                  <button type="submit" className="w-full bg-brand-red text-white h-12 rounded-xl font-bold shadow-lg shadow-brand-red/20 active:scale-95 transition-all">
+                    Enviar Solicitud
+                  </button>
+                </form>
+              </div>
             </div>
           )}
 
@@ -2483,6 +2693,423 @@ export default function BakeryDriverApp() {
                   >
                     <Plus className="w-6 h-6" />
                   </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── DEPÓSITO ── */}
+          {activeTab === "deposito" && isAdmin && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h1 className="text-2xl font-bold">Depósito</h1>
+                <button onClick={fetchDeposito} className="p-2 rounded-xl bg-white/5 hover:bg-white/10 transition-colors" title="Actualizar">
+                  <RefreshCw className={`w-4 h-4 text-zinc-400 ${loadingDeposito ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
+
+              {/* Sub-tabs */}
+              <div className="flex bg-black/20 p-1 rounded-xl border border-white/5 w-full overflow-x-auto">
+                {([['stock', 'Artículos'], ['mp', 'Materia Prima'], ['reservas', 'Reservas'], ['historial', 'Historial']] as const).map(([v, l]) => (
+                  <button key={v} onClick={() => { setDepositoSubTab(v); if (v === 'historial') fetchDepositoMovimientos(); }}
+                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${depositoSubTab === v ? 'bg-white/10 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}>
+                    {l}
+                    {v === 'reservas' && depositoReservasPendientes.length > 0 && (
+                      <span className="bg-red-500 text-white text-[10px] rounded-full h-4 w-4 flex items-center justify-center">{depositoReservasPendientes.length}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              {loadingDeposito && (
+                <div className="flex justify-center py-10"><RefreshCw className="w-6 h-6 text-brand-red animate-spin" /></div>
+              )}
+
+              {/* ── Sub-tab: Artículos ── */}
+              {!loadingDeposito && depositoSubTab === 'stock' && (
+                <div className="space-y-3">
+                  <div className="flex flex-col sm:flex-row gap-2 justify-between mb-2">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                      <input type="text" placeholder="Buscar artículo..." value={depositoSearchStock} onChange={e => { setDepositoSearchStock(e.target.value); setDepositoPageStock(1); }}
+                        className="w-full h-10 pl-9 pr-4 rounded-xl bg-white/5 border border-white/10 text-sm text-white focus:border-brand-red outline-none" />
+                    </div>
+                    <div className="flex justify-end gap-2 shrink-0 flex-wrap">
+                      <button onClick={() => { setDepositoModal('entrada'); setDepositoModalItem(null); }}
+                        className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-emerald-500/20 transition-colors">
+                        + Entrada
+                      </button>
+                      <button onClick={() => { setDepositoModal('distribuir'); setDepositoModalItem(null); }}
+                        className="flex items-center gap-1.5 bg-blue-500/10 border border-blue-500/20 text-blue-400 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-blue-500/20 transition-colors">
+                        → Distribuir
+                      </button>
+                      <button onClick={() => { setDepositoModal('devolucion'); setDepositoModalItem(null); }}
+                        className="flex items-center gap-1.5 bg-orange-500/10 border border-orange-500/20 text-orange-400 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-orange-500/20 transition-colors">
+                        ← Devolver
+                      </button>
+                    </div>
+                  </div>
+                  {filteredDepositoArticulos.length === 0 ? (
+                    <p className="text-center text-zinc-500 text-sm py-8">No se encontraron artículos.</p>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {filteredDepositoArticulos.slice((depositoPageStock - 1) * 10, depositoPageStock * 10).map(a => (
+                          <div key={a.id} className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
+                            <div className="flex justify-between items-start">
+                              <p className="font-semibold text-sm text-white">{a.nombre}</p>
+                              <div className="flex flex-wrap gap-1.5 shrink-0 justify-end">
+                                <button onClick={() => { setDepositoModal('entrada'); setDepositoModalItem(a); }}
+                                  className="text-[10px] px-2 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-lg hover:bg-emerald-500/20 transition-colors">+ Ent</button>
+                                <button onClick={() => { setDepositoModal('distribuir'); setDepositoModalItem(a); }}
+                                  className="text-[10px] px-2 py-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-lg hover:bg-blue-500/20 transition-colors">→ Dist</button>
+                                <button onClick={() => { setDepositoModal('devolucion'); setDepositoModalItem(a); }}
+                                  className="text-[10px] px-2 py-1 bg-orange-500/10 text-orange-400 border border-orange-500/20 rounded-lg hover:bg-orange-500/20 transition-colors">← Dev</button>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                              <div className="bg-black/20 rounded-xl p-2">
+                                <p className="text-zinc-400">En Depósito</p>
+                                <p className="font-bold text-white text-lg">{a.stock_deposito}</p>
+                              </div>
+                              <div className="bg-red-500/10 rounded-xl p-2">
+                                <p className="text-red-400">Reservado</p>
+                                <p className="font-bold text-red-300 text-lg">{a.total_reservado}</p>
+                                {(a.stock_reservado_v1 > 0 || a.stock_reservado_v2 > 0) && (
+                                  <p className="text-[10px] text-zinc-500 mt-0.5">
+                                    {a.stock_reservado_v1 > 0 && `M1: ${a.stock_reservado_v1} `}
+                                    {a.stock_reservado_v2 > 0 && `M2: ${a.stock_reservado_v2}`}
+                                  </p>
+                                )}
+                              </div>
+                              <div className={`rounded-xl p-2 ${a.disponible > 0 ? 'bg-emerald-500/10' : 'bg-zinc-800'}`}>
+                                <p className={a.disponible > 0 ? 'text-emerald-400' : 'text-zinc-500'}>Disponible</p>
+                                <p className={`font-bold text-lg ${a.disponible > 0 ? 'text-emerald-300' : 'text-zinc-500'}`}>{a.disponible}</p>
+                              </div>
+                            </div>
+                            <div className="flex gap-2 text-[10px] text-zinc-500 border-t border-white/5 pt-2">
+                              <span>🏭 Panadería: <strong className="text-zinc-300">{a.stock_panaderia}</strong></span>
+                              <span>🚐 M1: <strong className="text-zinc-300">{a.stock_vehiculo1}</strong></span>
+                              <span>🚐 M2: <strong className="text-zinc-300">{a.stock_vehiculo2}</strong></span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      
+                      {/* Paginación */}
+                      {Math.ceil(filteredDepositoArticulos.length / 10) > 1 && (
+                        <div className="flex items-center justify-center gap-4 py-4">
+                          <button onClick={() => setDepositoPageStock(p => Math.max(1, p - 1))} disabled={depositoPageStock === 1}
+                            className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm disabled:opacity-30 transition-colors">
+                            Anterior
+                          </button>
+                          <span className="text-xs text-zinc-500">
+                            Pág {depositoPageStock} de {Math.ceil(filteredDepositoArticulos.length / 10)}
+                          </span>
+                          <button onClick={() => setDepositoPageStock(p => Math.min(Math.ceil(filteredDepositoArticulos.length / 10), p + 1))} disabled={depositoPageStock === Math.ceil(filteredDepositoArticulos.length / 10)}
+                            className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm disabled:opacity-30 transition-colors">
+                            Siguiente
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* ── Sub-tab: Materia Prima ── */}
+              {!loadingDeposito && depositoSubTab === 'mp' && (
+                <div className="space-y-3">
+                  <div className="flex flex-col sm:flex-row gap-2 justify-between mb-2">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                      <input type="text" placeholder="Buscar materia prima..." value={depositoSearchMP} onChange={e => { setDepositoSearchMP(e.target.value); setDepositoPageMP(1); }}
+                        className="w-full h-10 pl-9 pr-4 rounded-xl bg-white/5 border border-white/10 text-sm text-white focus:border-brand-red outline-none" />
+                    </div>
+                    <div className="flex justify-end shrink-0">
+                      <button onClick={() => { setDepositoModal('entrada'); setDepositoModalItem({ tipo: 'materia_prima' }); }}
+                        className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-emerald-500/20 transition-colors">
+                        + Registrar Entrada MP
+                      </button>
+                    </div>
+                  </div>
+                  {filteredDepositoMP.length === 0 ? (
+                    <p className="text-center text-zinc-500 text-sm py-8">No se encontraron materias primas.</p>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {filteredDepositoMP.slice((depositoPageMP - 1) * 10, depositoPageMP * 10).map(mp => (
+                          <div key={mp.id} className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
+                            <div className="flex justify-between items-center">
+                              <p className="font-semibold text-sm text-white">{mp.nombre}</p>
+                              <button onClick={() => { setDepositoModal('salida_mp'); setDepositoModalItem(mp); }}
+                                className="text-[10px] px-2 py-1 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors shrink-0">
+                                ↓ Registrar Salida
+                              </button>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 text-center text-xs">
+                              <div className="bg-black/20 rounded-xl p-2">
+                                <p className="text-zinc-400">En Depósito</p>
+                                <p className="font-bold text-white text-lg">{mp.stock_deposito} <span className="text-sm text-zinc-500 font-normal">{mp.unidad_medida || 'kg'}</span></p>
+                              </div>
+                              <div className="bg-zinc-800 rounded-xl p-2">
+                                <p className="text-zinc-500">En Uso / Panadería</p>
+                                <p className="font-bold text-zinc-300 text-lg">{mp.stock_uso} <span className="text-sm text-zinc-500 font-normal">{mp.unidad_medida || 'kg'}</span></p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Paginación MP */}
+                      {Math.ceil(filteredDepositoMP.length / 10) > 1 && (
+                        <div className="flex items-center justify-center gap-4 py-4">
+                          <button onClick={() => setDepositoPageMP(p => Math.max(1, p - 1))} disabled={depositoPageMP === 1}
+                            className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm disabled:opacity-30 transition-colors">
+                            Anterior
+                          </button>
+                          <span className="text-xs text-zinc-500">
+                            Pág {depositoPageMP} de {Math.ceil(filteredDepositoMP.length / 10)}
+                          </span>
+                          <button onClick={() => setDepositoPageMP(p => Math.min(Math.ceil(filteredDepositoMP.length / 10), p + 1))} disabled={depositoPageMP === Math.ceil(filteredDepositoMP.length / 10)}
+                            className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm disabled:opacity-30 transition-colors">
+                            Siguiente
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* ── Sub-tab: Reservas Pendientes ── */}
+              {!loadingDeposito && depositoSubTab === 'reservas' && (
+                <div className="space-y-3">
+                  {depositoReservasPendientes.length === 0 ? (
+                    <p className="text-center text-zinc-500 text-sm py-8">No hay reservas pendientes de aprobación.</p>
+                  ) : (
+                    depositoReservasPendientes.map(r => (
+                      <div key={r.id} className="rounded-2xl border border-brand-yellow/20 bg-brand-yellow/5 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-sm text-white">{r.item_nombre}</p>
+                          <p className="text-xs text-zinc-400 mt-0.5">
+                            Móvil {r.vehiculo_solicitante} · {r.solicitante} · {r.created_at}
+                          </p>
+                          {r.motivo && <p className="text-xs text-zinc-500 mt-0.5 italic">"{r.motivo}"</p>}
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-lg font-bold text-brand-yellow">{r.cantidad} u.</span>
+                          <button onClick={async () => {
+                            try {
+                              const res = await fetch(`${API_URL}/deposito/reservas/${r.id}/aprobar`, {
+                                method: 'POST', headers: { Authorization: `Bearer ${token}` }
+                              });
+                              const data = await res.json();
+                              if (data.success) { fetchDeposito(); } else { alert(data.message); }
+                            } catch { alert('Error de conexión'); }
+                          }} className="px-3 py-1.5 bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 rounded-xl text-xs font-semibold hover:bg-emerald-500/30 transition-colors">
+                            ✓ Aprobar
+                          </button>
+                          <button onClick={async () => {
+                            try {
+                              const res = await fetch(`${API_URL}/deposito/reservas/${r.id}/cancelar`, {
+                                method: 'POST', headers: { Authorization: `Bearer ${token}` }
+                              });
+                              const data = await res.json();
+                              if (data.success) { fetchDeposito(); } else { alert(data.message); }
+                            } catch { alert('Error de conexión'); }
+                          }} className="px-3 py-1.5 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl text-xs font-semibold hover:bg-red-500/20 transition-colors">
+                            ✕ Rechazar
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {/* ── Sub-tab: Historial ── */}
+              {depositoSubTab === 'historial' && (
+                <div className="space-y-3">
+                  <div className="flex flex-col sm:flex-row gap-2 justify-between mb-4">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                      <input type="text" placeholder="Buscar por nombre..." value={depositoHistorySearch} onChange={e => { setDepositoHistorySearch(e.target.value); setDepositoHistoryPage(1); }}
+                        className="w-full h-10 pl-9 pr-4 rounded-xl bg-white/5 border border-white/10 text-sm text-white focus:border-brand-red outline-none" />
+                    </div>
+                    <div className="relative shrink-0">
+                      <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                      <input type="date" value={depositoHistoryDate} onChange={e => { setDepositoHistoryDate(e.target.value); setDepositoHistoryPage(1); }}
+                        className="h-10 pl-9 pr-4 rounded-xl bg-white/5 border border-white/10 text-sm text-white focus:border-brand-red outline-none [color-scheme:dark]" />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    {depositoMovimientos.length === 0 ? (
+                      <p className="text-center text-zinc-500 text-sm py-8">Sin movimientos registrados.</p>
+                    ) : (
+                      depositoMovimientos.map((m: any) => {
+                        const icons: Record<string, string> = {
+                          entrada: '📦', distribucion: '→', reserva: '🔒', cancelar_reserva: '🔓', salida_mp: '🧪'
+                        };
+                        const colors: Record<string, string> = {
+                          entrada: 'text-emerald-400', distribucion: 'text-blue-400',
+                          reserva: 'text-brand-yellow', cancelar_reserva: 'text-zinc-400', salida_mp: 'text-red-400'
+                        };
+                        return (
+                          <div key={m.id} className="rounded-xl border border-white/5 bg-white/5 p-3 flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                              <span className="text-xl">{icons[m.tipo_movimiento] ?? '•'}</span>
+                              <div>
+                                <p className={`text-xs font-semibold ${colors[m.tipo_movimiento] ?? 'text-white'}`}>
+                                  {m.tipo_movimiento.replace(/_/g, ' ').toUpperCase()} · {m.destino}
+                                </p>
+                                <p className="text-xs text-zinc-400">{m.item_nombre}</p>
+                                {m.motivo && <p className="text-[10px] text-zinc-600 italic">"{m.motivo}"</p>}
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="font-bold text-white">{m.cantidad} u.</p>
+                              <p className="text-[10px] text-zinc-500">{m.fecha} · {m.user}</p>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Paginación Historial */}
+                  {depositoHistoryTotalPages > 1 && (
+                    <div className="flex items-center justify-center gap-4 py-4">
+                      <button onClick={() => setDepositoHistoryPage(p => Math.max(1, p - 1))} disabled={depositoHistoryPage === 1}
+                        className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm disabled:opacity-30 transition-colors">
+                        Anterior
+                      </button>
+                      <span className="text-xs text-zinc-500">
+                        Pág {depositoHistoryPage} de {depositoHistoryTotalPages}
+                      </span>
+                      <button onClick={() => setDepositoHistoryPage(p => Math.min(depositoHistoryTotalPages, p + 1))} disabled={depositoHistoryPage === depositoHistoryTotalPages}
+                        className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm disabled:opacity-30 transition-colors">
+                        Siguiente
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── Modales de Acción ── */}
+              {depositoModal && (
+                <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4">
+                  <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setDepositoModal(null)} />
+                  <div className="relative w-full max-w-md rounded-t-3xl md:rounded-3xl border-t md:border border-white/10 bg-zinc-950 p-6 pb-10 md:pb-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+                    <div className="mx-auto mb-5 h-1 w-12 rounded-full bg-white/20 md:hidden" />
+                    <div className="flex items-center justify-between mb-5">
+                      <h2 className="text-lg font-bold">
+                        {depositoModal === 'entrada' ? '+ Registrar Entrada al Depósito' :
+                         depositoModal === 'distribuir' ? '→ Distribuir desde Depósito' :
+                         depositoModal === 'devolucion' ? '← Devolver al Depósito' :
+                         '↓ Salida de Materia Prima'}
+                      </h2>
+                      <button onClick={() => setDepositoModal(null)} className="p-2 rounded-full bg-white/5 border border-white/10">
+                        <X className="h-4 w-4 text-zinc-400" />
+                      </button>
+                    </div>
+                    <form onSubmit={async (e) => {
+                      e.preventDefault();
+                      const fd = new FormData(e.target as HTMLFormElement);
+                      const body: any = {
+                        tipo_item: fd.get('tipo_item'),
+                        item_id: fd.get('item_id'),
+                        motivo: fd.get('motivo') || undefined,
+                      };
+
+                      if (depositoModal === 'distribuir' || depositoModal === 'devolucion') {
+                        body.cantidad_panaderia = fd.get('cantidad_panaderia') ? parseFloat(fd.get('cantidad_panaderia') as string) : 0;
+                        body.cantidad_v1 = fd.get('cantidad_v1') ? parseFloat(fd.get('cantidad_v1') as string) : 0;
+                        body.cantidad_v2 = fd.get('cantidad_v2') ? parseFloat(fd.get('cantidad_v2') as string) : 0;
+                      } else {
+                        body.cantidad = parseFloat(fd.get('cantidad') as string);
+                      }
+
+                      const url = depositoModal === 'entrada' ? `${API_URL}/deposito/entrada` :
+                                  depositoModal === 'distribuir' ? `${API_URL}/deposito/distribuir` :
+                                  depositoModal === 'devolucion' ? `${API_URL}/deposito/devolucion` :
+                                  `${API_URL}/deposito/mp/salida`;
+                      try {
+                        const res = await fetch(url, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', Authorization: `Bearer ${token}` },
+                          body: JSON.stringify(body),
+                        });
+                        const data = await res.json();
+                        if (data.success) { setDepositoModal(null); fetchDeposito(); }
+                        else { alert(data.message || 'Error'); }
+                      } catch { alert('Error de conexión'); }
+                    }} className="space-y-4">
+                      {/* Selección de ítem */}
+                      <div>
+                        <label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">
+                          {depositoModal === 'salida_mp' ? 'Materia Prima' : 'Producto'}
+                        </label>
+                        <select name="item_id" required defaultValue={depositoModalItem?.id ?? ''}
+                          className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-red">
+                          <option value="" className="text-black bg-white">Seleccioná un ítem</option>
+                          {depositoModal === 'salida_mp' || (depositoModal === 'distribuir' && depositoModalItem?.tipo === 'materia_prima')
+                            ? depositoMP.map((mp: any) => <option key={mp.id} value={mp.id} className="text-black bg-white">{mp.nombre} (depósito: {mp.stock_deposito})</option>)
+                            : depositoArticulos.map((a: any) => <option key={a.id} value={a.id} className="text-black bg-white">{a.nombre} (depósito: {a.stock_deposito})</option>)
+                          }
+                        </select>
+                        <input type="hidden" name="tipo_item" value={depositoModal === 'salida_mp' || depositoModalItem?.tipo === 'materia_prima' ? 'materia_prima' : 'articulo'} />
+                      </div>
+                      
+                      {/* Cantidades Multiples (distribuir o devolucion) */}
+                      {(depositoModal === 'distribuir' || depositoModal === 'devolucion') && (
+                        <div className="grid grid-cols-3 gap-2">
+                          <div>
+                            <label className="text-[10px] text-zinc-400 uppercase tracking-widest mb-1.5 block text-center">Panadería</label>
+                            <input name="cantidad_panaderia" type="number" step="0.01" min="0" placeholder="0"
+                              defaultValue={depositoModal === 'devolucion' && depositoModalItem ? depositoModalItem.stock_panaderia : undefined}
+                              className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-2 text-center text-sm text-white outline-none focus:border-brand-yellow" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-zinc-400 uppercase tracking-widest mb-1.5 block text-center">Móvil 1</label>
+                            <input name="cantidad_v1" type="number" step="0.01" min="0" placeholder="0"
+                              defaultValue={depositoModal === 'devolucion' && depositoModalItem ? depositoModalItem.stock_vehiculo1 : undefined}
+                              className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-2 text-center text-sm text-emerald-300 outline-none focus:border-emerald-500" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-zinc-400 uppercase tracking-widest mb-1.5 block text-center">Móvil 2</label>
+                            <input name="cantidad_v2" type="number" step="0.01" min="0" placeholder="0"
+                              defaultValue={depositoModal === 'devolucion' && depositoModalItem ? depositoModalItem.stock_vehiculo2 : undefined}
+                              className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-2 text-center text-sm text-blue-300 outline-none focus:border-blue-500" />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Cantidad Única (solo entrada o salida mp) */}
+                      {(depositoModal === 'entrada' || depositoModal === 'salida_mp') && (
+                        <div>
+                          <label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">Cantidad</label>
+                          <input name="cantidad" type="number" step="0.01" min="0.01" required placeholder="Ej: 100"
+                            className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-red" />
+                        </div>
+                      )}
+                      {/* Motivo */}
+                      <div>
+                        <label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">
+                          Motivo / Nota {depositoModal === 'salida_mp' ? '(obligatorio)' : '(opcional)'}
+                        </label>
+                        <input name="motivo" type="text" required={depositoModal === 'salida_mp'} placeholder="Ej: Compra proveedor XYZ / producción del lunes"
+                          className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-red" />
+                      </div>
+                      <div className="flex gap-3 pt-2">
+                        <button type="button" onClick={() => setDepositoModal(null)}
+                          className="flex-1 py-3.5 rounded-xl border border-white/10 text-zinc-300 font-semibold active:scale-95 text-sm">Cancelar</button>
+                        <button type="submit"
+                          className="flex-1 bg-brand-red text-white py-3.5 rounded-xl font-bold active:scale-95 text-sm">Confirmar</button>
+                      </div>
+                    </form>
+                  </div>
                 </div>
               )}
             </div>
@@ -2911,8 +3538,8 @@ export default function BakeryDriverApp() {
         clients={clients}
         token={token}
         onClose={() => setEditingProduct(null)}
-        onSaved={() => { fetchAllData(token!); setAdminStockRefresh(prev => prev + 1); setEditingProduct(null); }}
-        onRefresh={() => { fetchAllData(token!); setAdminStockRefresh(prev => prev + 1); }}
+        onSaved={() => { fetchAllData(token!, false); setAdminStockRefresh(prev => prev + 1); setEditingProduct(null); }}
+        onRefresh={() => { fetchAllData(token!, false); setAdminStockRefresh(prev => prev + 1); }}
       />
 
       {/* ── Checkout Modal ── */}
@@ -2930,7 +3557,7 @@ export default function BakeryDriverApp() {
         onSuccess={() => {
           setCart({});
           setEditingPedido(null);
-          fetchAllData(token!);
+          fetchAllData(token!, false);
         }}
       />
 
@@ -2955,7 +3582,7 @@ export default function BakeryDriverApp() {
           onClose={() => setPaymentClient(null)}
           onSuccess={() => {
             setPaymentClient(null);
-            fetchAllData(token!);
+            fetchAllData(token!, false);
           }}
         />
       )}
