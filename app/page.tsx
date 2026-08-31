@@ -1486,8 +1486,6 @@ export default function BakeryDriverApp() {
     if (depositoSearchStock.trim()) {
       list = list.filter(a => a.nombre.toLowerCase().includes(depositoSearchStock.toLowerCase()));
     }
-    // Ordenar por los mas usados (mayor sold_qty)
-    list = [...list].sort((a, b) => (b.sold_qty || 0) - (a.sold_qty || 0));
     return list;
   }, [depositoArticulos, depositoSearchStock]);
 
