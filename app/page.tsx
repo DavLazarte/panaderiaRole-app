@@ -1838,7 +1838,7 @@ export default function BakeryDriverApp() {
   const [recetaSearch, setRecetaSearch] = useState("");
   const [recetaModal, setRecetaModal] = useState<null | 'crear' | 'editar'>(null);
   const [recetaEditing, setRecetaEditing] = useState<any>(null);
-  const [recetaForm, setRecetaForm] = useState({ nombre: '', descripcion: '', porciones: 1, id_articulo_resultado: '' as any });
+  const [recetaForm, setRecetaForm] = useState<{ nombre: string; descripcion: string; porciones: number | string; id_articulo_resultado: any }>({ nombre: '', descripcion: '', porciones: 1, id_articulo_resultado: '' });
   const [recetaIngredientes, setRecetaIngredientes] = useState<any[]>([]);
   const [recetaIngSearch, setRecetaIngSearch] = useState('');
   const [recetaEjecutarModal, setRecetaEjecutarModal] = useState<any>(null);
