@@ -1815,7 +1815,7 @@ export default function BakeryDriverApp() {
   const [depositoHistoryTotalPages, setDepositoHistoryTotalPages] = useState(1);
   const [loadingDeposito, setLoadingDeposito] = useState(false);
   const [depositoSubTab, setDepositoSubTab] = useState<'stock' | 'mp' | 'historial' | 'reservas'>('stock');
-  const [depositoModal, setDepositoModal] = useState<null | 'entrada' | 'distribuir' | 'salida_mp' | 'devolucion'>(null);
+  const [depositoModal, setDepositoModal] = useState<null | 'entrada' | 'editar_entrada' | 'distribuir' | 'salida_mp' | 'devolucion'>(null);
   const [depositoModalItem, setDepositoModalItem] = useState<any>(null);
   const [depositoSearchStock, setDepositoSearchStock] = useState("");
   const [depositoPageStock, setDepositoPageStock] = useState(1);
