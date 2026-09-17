@@ -4593,14 +4593,6 @@ export default function BakeryDriverApp() {
         pedidoItems={pedidoCheckout?.items}
         pedidoCliente={pedidoCheckout?.cliente ?? null}
         isEditing={!!editingPedido}
-        onClientCreated={(newClient) => {
-          setClients(prev => {
-            const exists = prev.some(c => c.id === newClient.id);
-            if (exists) return prev;
-            return [newClient, ...prev];
-          });
-          fetchAllData(token!, false);
-        }}
         onSuccess={() => {
           setCart({});
           setEditingPedido(null);
