@@ -76,7 +76,336 @@ interface Product  { id: number; name: string; price: number; quantity: number; 
 interface Client   { id: number; name: string; address: string; balance: number; }
 interface Delivery { id: number; customer: string; status: string; items: string; raw_items?: {id?: number, name: string, qty: number}[]; total: string; total_raw: number; address: string; advance?: number; fecha_entrega?: string | null; }
 interface SaleItem { id: number; name: string; price: number; quantity: number; }
-interface Categoria { id_categoria: number; nombre: string; }
+interface Categoria { id_categoria: number; nombre: string; descripcion?: string; estado?: string; articulos_count?: number; }
+
+
+const TagIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+  </svg>
+);
+
+// ─── CategoriasModal ─────────────────────────────────────────────────────────
+function CategoriasModal({
+  open,
+  onClose,
+  token,
+  onRefresh
+}: {
+  open: boolean;
+  onClose: () => void;
+  token: string;
+  onRefresh: () => void;
+}) {
+  const [categoriasList, setCategoriasList] = useState<Categoria[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [editingCat, setEditingCat] = useState<{ id?: number; nombre: string; descripcion: string; estado: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  const fetchCategorias = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/categorias`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCategoriasList(data);
+      }
+    } catch {
+      setError("Error al cargar categorías");
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (open) {
+      setError(null);
+      setSuccessMsg(null);
+      setEditingCat(null);
+      fetchCategorias();
+    }
+  }, [open, fetchCategorias]);
+
+  if (!open) return null;
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCat || !editingCat.nombre.trim()) return;
+    setSaving(true);
+    setError(null);
+    setSuccessMsg(null);
+
+    try {
+      const isEdit = !!editingCat.id;
+      const url = isEdit
+        ? `${API_URL}/admin/categorias/${editingCat.id}`
+        : `${API_URL}/admin/categorias`;
+      const method = isEdit ? "PUT" : "POST";
+
+      const res = await fetch(url, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          nombre: editingCat.nombre.trim(),
+          descripcion: editingCat.descripcion.trim() || null,
+          estado: editingCat.estado
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSuccessMsg(isEdit ? "Categoría actualizada" : "Categoría creada con éxito");
+        setEditingCat(null);
+        await fetchCategorias();
+        onRefresh();
+      } else {
+        setError(data.message || data.error || "Error al guardar categoría");
+      }
+    } catch {
+      setError("Error de conexión al guardar categoría");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (cat: Categoria) => {
+    if (!window.confirm(`¿Estás seguro de eliminar la categoría "${cat.nombre}"?`)) return;
+    setDeletingId(cat.id_categoria);
+    setError(null);
+    setSuccessMsg(null);
+
+    try {
+      const res = await fetch(`${API_URL}/admin/categorias/${cat.id_categoria}`, {
+        method: "DELETE",
+        headers: {
+          "Accept": "application/json",
+          Authorization: `Bearer ${token}`
+        }
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSuccessMsg("Categoría eliminada con éxito");
+        await fetchCategorias();
+        onRefresh();
+      } else {
+        setError(data.message || data.error || "No se pudo eliminar la categoría");
+      }
+    } catch {
+      setError("Error de conexión al eliminar categoría");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-lg rounded-3xl border border-white/10 bg-zinc-950 p-6 shadow-2xl flex flex-col max-h-[90vh]">
+        {/* Header */}
+        <div className="flex items-center justify-between pb-4 border-b border-white/10">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-brand-yellow/10 border border-brand-yellow/20 flex items-center justify-center">
+              <TagIcon className="w-5 h-5 text-brand-yellow" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-white">Gestión de Categorías</h2>
+              <p className="text-xs text-zinc-400">Organiza los productos por rubros</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-full bg-white/5 hover:bg-white/10 text-zinc-400">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Feedback messages */}
+        {error && (
+          <div className="mt-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-400 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+        {successMsg && (
+          <div className="mt-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-400 flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span>{successMsg}</span>
+          </div>
+        )}
+
+        {/* Form if editing/creating */}
+        {editingCat ? (
+          <form onSubmit={handleSave} className="py-4 space-y-3.5 overflow-y-auto">
+            <div className="flex items-center justify-between pb-2 border-b border-white/5">
+              <h3 className="text-sm font-bold text-brand-yellow">
+                {editingCat.id ? "Editar Categoría" : "Nueva Categoría"}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingCat(null)}
+                className="text-xs text-zinc-400 hover:text-white"
+              >
+                Volver a la lista
+              </button>
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-zinc-400 block mb-1">Nombre de Categoría *</label>
+              <input
+                type="text"
+                required
+                value={editingCat.nombre}
+                onChange={e => setEditingCat({ ...editingCat, nombre: e.target.value })}
+                placeholder="Ej: Panificados, Facturas, Confitería..."
+                className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-3.5 text-sm outline-none focus:border-brand-red text-white placeholder:text-zinc-600"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-zinc-400 block mb-1">Descripción (Opcional)</label>
+              <input
+                type="text"
+                value={editingCat.descripcion}
+                onChange={e => setEditingCat({ ...editingCat, descripcion: e.target.value })}
+                placeholder="Breve descripción..."
+                className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-3.5 text-sm outline-none focus:border-brand-red text-white placeholder:text-zinc-600"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-zinc-400 block mb-1">Estado</label>
+              <select
+                value={editingCat.estado}
+                onChange={e => setEditingCat({ ...editingCat, estado: e.target.value })}
+                className="w-full h-11 rounded-xl bg-zinc-900 border border-white/10 px-3.5 text-sm outline-none focus:border-brand-red text-white"
+              >
+                <option value="activo">Activo</option>
+                <option value="inactivo">Inactivo</option>
+              </select>
+            </div>
+
+            <div className="flex gap-2.5 pt-3">
+              <button
+                type="button"
+                onClick={() => setEditingCat(null)}
+                className="flex-1 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 font-semibold text-sm transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={saving || !editingCat.nombre.trim()}
+                className="flex-1 py-3 rounded-xl bg-brand-red hover:bg-red-600 text-white font-bold text-sm shadow-lg shadow-brand-red/20 disabled:opacity-40 transition-all flex items-center justify-center gap-2"
+              >
+                {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                <span>{saving ? "Guardando..." : editingCat.id ? "Guardar Cambios" : "Crear"}</span>
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="py-4 flex-1 flex flex-col min-h-0 overflow-hidden">
+            <div className="flex items-center justify-between mb-3 shrink-0">
+              <span className="text-xs text-zinc-400 font-semibold uppercase tracking-wider">
+                {categoriasList.length} Categoría(s)
+              </span>
+              <button
+                onClick={() => setEditingCat({ nombre: "", descripcion: "", estado: "activo" })}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-brand-red hover:bg-red-600 rounded-xl text-xs font-bold text-white transition-all shadow-sm"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Nueva Categoría</span>
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+              {loading ? (
+                <div className="flex items-center justify-center py-10 text-zinc-500">
+                  <RefreshCw className="w-5 h-5 animate-spin mr-2" />
+                  <span>Cargando categorías...</span>
+                </div>
+              ) : categoriasList.length === 0 ? (
+                <div className="text-center py-10 text-zinc-500 text-sm">
+                  No hay categorías registradas.
+                </div>
+              ) : (
+                categoriasList.map(cat => (
+                  <div
+                    key={cat.id_categoria}
+                    className="flex items-center justify-between p-3.5 rounded-2xl border border-white/5 bg-white/5 hover:bg-white/10 transition-all"
+                  >
+                    <div className="flex-1 min-w-0 pr-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-white truncate">{cat.nombre}</span>
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
+                            cat.estado === "inactivo"
+                              ? "bg-zinc-800 text-zinc-400"
+                              : "bg-emerald-500/20 text-emerald-300"
+                          }`}
+                        >
+                          {cat.estado || "activo"}
+                        </span>
+                      </div>
+                      {cat.descripcion && (
+                        <p className="text-xs text-zinc-400 truncate mt-0.5">{cat.descripcion}</p>
+                      )}
+                      <p className="text-[11px] text-zinc-500 mt-1">
+                        {cat.articulos_count ?? 0} producto(s) vinculado(s)
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        onClick={() => setEditingCat({
+                          id: cat.id_categoria,
+                          nombre: cat.nombre,
+                          descripcion: cat.descripcion || "",
+                          estado: cat.estado || "activo"
+                        })}
+                        className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 transition-colors"
+                        title="Editar"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(cat)}
+                        disabled={deletingId === cat.id_categoria}
+                        className="p-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors disabled:opacity-40"
+                        title="Eliminar"
+                      >
+                        {deletingId === cat.id_categoria ? (
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="pt-4 border-t border-white/10 mt-auto shrink-0">
+              <button
+                onClick={onClose}
+                className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 font-semibold text-sm transition-colors"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ─── CheckoutModal ────────────────────────────────────────────────────────────
 function CheckoutModal({
@@ -212,7 +541,11 @@ function CheckoutModal({
 
         res = await fetch(`${API_URL}/ventas`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          headers: { 
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            Authorization: `Bearer ${token}` 
+          },
           body: JSON.stringify({
             cart: activeItems.map(i => ({ id: i.id, quantity: i.quantity, price: i.price })),
             total: totalFinal,
@@ -235,10 +568,18 @@ function CheckoutModal({
         // Mostramos el modal de descarga para todas las ventas registradas por la caja/reparto
         setCompletedVentaId(vId);
       } else {
-        const err = await res.json();
-        alert(err.message || "Error al registrar");
+        try {
+          const err = await res.json();
+          alert(err.message || err.error || "Error al registrar venta");
+        } catch {
+          const text = await res.text();
+          alert(`Error del servidor (${res.status}): ${text.substring(0, 120)}`);
+        }
       }
-    } catch { alert("Error de conexión"); }
+    } catch (err: any) { 
+      console.error("Error al registrar venta:", err);
+      alert(err?.message || "Error de conexión"); 
+    }
     finally { setLoading(false); }
   };
 
@@ -1192,23 +1533,22 @@ function ProductEditModal({ open, product, categorias, clients, token, onClose, 
 
           {tab === "inventario" && (
             <div className="space-y-4">
-              <div className="bg-brand-red/10 border border-brand-red/20 rounded-xl p-3 text-center">
-                <p className="text-brand-yellow text-xs font-semibold uppercase tracking-wider">Gestión de Stock Centralizada</p>
-                <p className="text-zinc-400 text-xs mt-1">El stock ya no se puede editar manualmente desde aquí. Toda carga, reserva o distribución debe realizarse desde la pestaña "Depósito".</p>
-              </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-white/5 p-4 rounded-2xl border border-white/10 opacity-70">
+                <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
                   <label className="block text-xs font-semibold text-brand-yellow mb-2 uppercase tracking-wider text-center">Stock Local (Panadería)</label>
-                  <div className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-lg font-bold text-center text-zinc-300">{formData.stock_local}</div>
+                  <input type="number" value={formData.stock_local} onChange={e => setFormData({...formData, stock_local: Number(e.target.value)})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-lg font-bold text-center text-zinc-300 focus:border-brand-yellow outline-none" />
                 </div>
-                <div className="bg-white/5 p-4 rounded-2xl border border-white/10 opacity-70">
+                <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
                   <label className="block text-xs font-semibold text-emerald-400 mb-2 uppercase tracking-wider text-center">Vehículo 1</label>
-                  <div className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-lg font-bold text-center text-zinc-300">{formData.stock_vehiculo1}</div>
+                  <input type="number" value={formData.stock_vehiculo1} onChange={e => setFormData({...formData, stock_vehiculo1: Number(e.target.value)})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-lg font-bold text-center text-zinc-300 focus:border-emerald-400 outline-none" />
                 </div>
-                <div className="bg-white/5 p-4 rounded-2xl border border-white/10 opacity-70">
+                <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
                   <label className="block text-xs font-semibold text-blue-400 mb-2 uppercase tracking-wider text-center">Vehículo 2</label>
-                  <div className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-lg font-bold text-center text-zinc-300">{formData.stock_vehiculo2}</div>
+                  <input type="number" value={formData.stock_vehiculo2} onChange={e => setFormData({...formData, stock_vehiculo2: Number(e.target.value)})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-lg font-bold text-center text-zinc-300 focus:border-blue-400 outline-none" />
                 </div>
+              </div>
+              <div className="bg-white/5 border border-white/10 rounded-xl p-3 text-center">
+                <p className="text-zinc-400 text-xs mt-1">Al modificar el stock aquí, se crearán automáticamente los movimientos de distribución o devolución en el Depósito.</p>
               </div>
             </div>
           )}
@@ -1354,6 +1694,7 @@ export default function BakeryDriverApp() {
   const [loading, setLoading]     = useState(true);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [categoriasModalOpen, setCategoriasModalOpen] = useState(false);
 
   const [isReordering, setIsReordering] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
@@ -1481,6 +1822,28 @@ export default function BakeryDriverApp() {
   const [depositoSearchMP, setDepositoSearchMP] = useState("");
   const [depositoPageMP, setDepositoPageMP] = useState(1);
 
+  // ── Materias Primas state ────────────────────────────────────────────────────
+  const [materiaPrimas, setMateriaPrimas] = useState<any[]>([]);
+  const [loadingMP, setLoadingMP] = useState(false);
+  const [mpSearch, setMpSearch] = useState("");
+  const [mpPage, setMpPage] = useState(1);
+  const [mpTotalPages, setMpTotalPages] = useState(1);
+  const [mpModal, setMpModal] = useState<null | 'crear' | 'editar'>(null);
+  const [mpEditing, setMpEditing] = useState<any>(null);
+  const [mpForm, setMpForm] = useState({ nombre: '', precio: 0, peso: 0, unidad_medida: 'kg' });
+
+  // ── Recetas state ────────────────────────────────────────────────────────────
+  const [recetas, setRecetas] = useState<any[]>([]);
+  const [loadingRecetas, setLoadingRecetas] = useState(false);
+  const [recetaSearch, setRecetaSearch] = useState("");
+  const [recetaModal, setRecetaModal] = useState<null | 'crear' | 'editar'>(null);
+  const [recetaEditing, setRecetaEditing] = useState<any>(null);
+  const [recetaForm, setRecetaForm] = useState({ nombre: '', descripcion: '', porciones: 1, id_articulo_resultado: '' as any });
+  const [recetaIngredientes, setRecetaIngredientes] = useState<any[]>([]);
+  const [recetaIngSearch, setRecetaIngSearch] = useState('');
+  const [recetaEjecutarModal, setRecetaEjecutarModal] = useState<any>(null);
+  const [recetaEjecutarQty, setRecetaEjecutarQty] = useState(1);
+
   const filteredDepositoArticulos = useMemo(() => {
     let list = depositoArticulos;
     if (depositoSearchStock.trim()) {
@@ -1496,6 +1859,55 @@ export default function BakeryDriverApp() {
     }
     return list;
   }, [depositoMP, depositoSearchMP]);
+
+  const [depositoModalSelectedId, setDepositoModalSelectedId] = useState<string | number>('');
+  const [depositoModalItemSearch, setDepositoModalItemSearch] = useState("");
+
+  const depositoModalItemsList = useMemo(() => {
+    const isMP = depositoModal === 'salida_mp' || depositoModalItem?.tipo === 'materia_prima';
+    return isMP ? depositoMP : depositoArticulos;
+  }, [depositoModal, depositoModalItem, depositoMP, depositoArticulos]);
+
+  const depositoModalSelectedItemObj = useMemo(() => {
+    return depositoModalItemsList.find(i => String(i.id) === String(depositoModalSelectedId));
+  }, [depositoModalItemsList, depositoModalSelectedId]);
+
+  const allMateriasPrimas = useMemo(() => {
+    const map = new Map<string, any>();
+    depositoMP.forEach(mp => {
+      if (mp && mp.id) {
+        map.set(String(mp.id), {
+          id: mp.id,
+          nombre: mp.nombre || mp.producto || '',
+          stock_deposito: mp.stock_deposito ?? 0,
+          unidad_medida: mp.unidad_medida || 'kg',
+          precio: Number(mp.precio) || 0,
+          peso: Number(mp.peso) || 1,
+        });
+      }
+    });
+    materiaPrimas.forEach(mp => {
+      if (mp && mp.id) {
+        const existing = map.get(String(mp.id)) || {};
+        map.set(String(mp.id), {
+          id: mp.id,
+          nombre: mp.nombre || mp.producto || existing.nombre || '',
+          stock_deposito: mp.stock_deposito ?? existing.stock_deposito ?? 0,
+          unidad_medida: mp.unidad_medida || existing.unidad_medida || 'kg',
+          precio: Number(mp.precio) || existing.precio || 0,
+          peso: Number(mp.peso) || existing.peso || 1,
+        });
+      }
+    });
+    return Array.from(map.values());
+  }, [depositoMP, materiaPrimas]);
+
+  useEffect(() => {
+    if (depositoModal) {
+      setDepositoModalSelectedId(depositoModalItem?.id ?? '');
+      setDepositoModalItemSearch('');
+    }
+  }, [depositoModal, depositoModalItem]);
 
 
   // Only payment filter goes to server; caja opens a modal (no server filter)
@@ -1558,7 +1970,12 @@ export default function BakeryDriverApp() {
     const fetchCajaSales = async () => {
       setLoadingCajaSales(true);
       try {
-        let queryParams = `filter_type=${historyFilterType}&search=${historySearch}&tipo=${historyType}&user_id=${selectedCaja.user_id}`;
+        let queryParams = `filter_type=${historyFilterType}&search=${historySearch}&tipo=${historyType}&per_page=1000`;
+        if (selectedCaja.caja_id === 'panaderia' || selectedCaja.tipo_caja === 'panaderia') {
+          queryParams += `&caja_tipo=panaderia`;
+        } else {
+          queryParams += `&caja_tipo=reparto&user_id=${selectedCaja.user_id}`;
+        }
         if (cajaFormaPago) queryParams += `&forma_pago=${cajaFormaPago}`;
         if (historyFilterType === 'range') {
           queryParams += `&start_date=${historyStartDate}&end_date=${historyEndDate}`;
@@ -1746,9 +2163,15 @@ export default function BakeryDriverApp() {
            const cliRes = await fetch(`${API_URL}/clientes`, { headers: { Authorization: `Bearer ${token}` } });
            if (cliRes.ok) setClients(await cliRes.json());
         }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.message || "Error al guardar");
       }
-    } catch(e) {}
-    setSavingPersona(false);
+    } catch(e) {
+      alert("Error de conexión al guardar");
+    } finally {
+      setSavingPersona(false);
+    }
   };
 
   const handleDeletePersona = async (id: number) => {
@@ -1860,6 +2283,48 @@ export default function BakeryDriverApp() {
       fetchDepositoMovimientos();
     }
   }, [fetchDepositoMovimientos, depositoSubTab]);
+
+  const fetchMateriaPrimas = useCallback(async (page = 1, search = '') => {
+    if (!token) return;
+    setLoadingMP(true);
+    try {
+      const params = new URLSearchParams({ page: page.toString(), per_page: '20' });
+      if (search) params.append('search', search);
+      const res = await fetch(`${API_URL}/admin/materias-primas?${params}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const data = await res.json();
+        setMateriaPrimas(data.data ?? []);
+        setMpTotalPages(data.last_page ?? 1);
+      }
+    } catch { }
+    setLoadingMP(false);
+  }, [token]);
+
+  const fetchRecetas = useCallback(async (search = '') => {
+    if (!token) return;
+    setLoadingRecetas(true);
+    try {
+      const params = new URLSearchParams();
+      if (search) params.append('search', search);
+      const res = await fetch(`${API_URL}/admin/recetas?${params}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) setRecetas(await res.json());
+    } catch { }
+    setLoadingRecetas(false);
+  }, [token]);
+
+  useEffect(() => {
+    if (activeTab === 'materias') {
+      fetchMateriaPrimas(mpPage, mpSearch);
+    }
+  }, [activeTab, fetchMateriaPrimas, mpPage]);
+
+  useEffect(() => {
+    if (activeTab === 'recetas') {
+      fetchRecetas(recetaSearch);
+      fetchDeposito();
+      fetchMateriaPrimas(1, '');
+    }
+  }, [activeTab, fetchRecetas, fetchDeposito, fetchMateriaPrimas]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2083,6 +2548,16 @@ export default function BakeryDriverApp() {
               <button onClick={() => { setActiveTab('deposito'); fetchDeposito(); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'deposito' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
                 <Warehouse className="w-5 h-5"/> <span className="font-semibold text-sm">Depósito</span>
                 {depositoReservasPendientes.length > 0 && <span className="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">{depositoReservasPendientes.length}</span>}
+              </button>
+            )}
+            {isAdmin && (
+              <button onClick={() => { setActiveTab('materias'); fetchMateriaPrimas(mpPage, mpSearch); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'materias' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
+                <ClipboardList className="w-5 h-5"/> <span className="font-semibold text-sm">Materias Primas</span>
+              </button>
+            )}
+            {isAdmin && (
+              <button onClick={() => { setActiveTab('recetas'); fetchRecetas(recetaSearch); fetchMateriaPrimas(1, ''); fetchDeposito(); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'recetas' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
+                <CheckCircle2 className="w-5 h-5"/> <span className="font-semibold text-sm">Recetas</span>
               </button>
             )}
           </nav>
@@ -2422,7 +2897,18 @@ export default function BakeryDriverApp() {
           {/* ── STOCK ── */}
           {activeTab === "stock" && (
             <div className="space-y-4">
-              <h1 className="text-2xl font-bold">Mi Stock {isAdmin ? "(Admin)" : ""}</h1>
+              <div className="flex items-center justify-between">
+                <h1 className="text-2xl font-bold">Mi Stock {isAdmin ? "(Admin)" : ""}</h1>
+                {isAdmin && (
+                  <button
+                    onClick={() => setCategoriasModalOpen(true)}
+                    className="flex items-center gap-2 px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs font-semibold text-zinc-200 transition-all hover:border-brand-red/50 shadow-sm"
+                  >
+                    <TagIcon className="w-4 h-4 text-brand-yellow" />
+                    <span>Categorías</span>
+                  </button>
+                )}
+              </div>
               {isAdmin ? (
                 <>
                   <div className="relative">
@@ -2562,11 +3048,465 @@ export default function BakeryDriverApp() {
             </div>
           )}
 
+          {/* ── MATERIAS PRIMAS ── */}
+          {activeTab === "materias" && isAdmin && (
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <h1 className="text-2xl font-bold">Materias Primas</h1>
+                <button onClick={() => { setMpForm({ nombre: '', precio: 0, peso: 0, unidad_medida: 'kg' }); setMpEditing(null); setMpModal('crear'); }}
+                  className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-emerald-500/20 transition-colors shrink-0">
+                  <Plus className="w-4 h-4" /> Nueva Materia Prima
+                </button>
+              </div>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                <input type="text" placeholder="Buscar..." value={mpSearch}
+                  onChange={e => { setMpSearch(e.target.value); setMpPage(1); fetchMateriaPrimas(1, e.target.value); }}
+                  className="w-full h-10 pl-9 pr-4 rounded-xl bg-white/5 border border-white/10 text-sm text-white focus:border-brand-red outline-none" />
+              </div>
+              {loadingMP ? <p className="text-center text-zinc-500 py-8">Cargando...</p> : (
+                <div className="space-y-2">
+                  {materiaPrimas.map((mp: any) => (
+                    <div key={mp.id} className="rounded-2xl border border-white/10 bg-white/5 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="space-y-1">
+                        <p className="font-semibold text-white">{mp.nombre}</p>
+                        <div className="flex flex-wrap gap-3 text-xs text-zinc-400">
+                          <span>Precio: <strong className="text-zinc-200">${mp.precio}</strong></span>
+                          <span>Peso: <strong className="text-zinc-200">{mp.peso} {mp.unidad_medida}</strong></span>
+                          <span>En depósito: <strong className="text-emerald-300">{mp.stock_deposito} {mp.unidad_medida}</strong></span>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        <button onClick={() => { setMpForm({ nombre: mp.nombre, precio: mp.precio, peso: mp.peso, unidad_medida: mp.unidad_medida }); setMpEditing(mp); setMpModal('editar'); }}
+                          className="text-xs px-3 py-1.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-lg hover:bg-blue-500/20 transition-colors">
+                          <Edit2 className="w-3 h-3 inline mr-1" />Editar
+                        </button>
+                        <button onClick={async () => {
+                          if (!confirm(`¿Eliminar "${mp.nombre}"?`)) return;
+                          const res = await fetch(`${API_URL}/admin/materias-primas/${mp.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+                          const d = await res.json();
+                          if (d.success) fetchMateriaPrimas(mpPage, mpSearch); else alert(d.message);
+                        }} className="text-xs px-3 py-1.5 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors">
+                          <Trash2 className="w-3 h-3 inline mr-1" />Eliminar
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {materiaPrimas.length === 0 && <p className="text-center text-zinc-500 py-8">No se encontraron materias primas.</p>}
+                </div>
+              )}
+              {mpTotalPages > 1 && (
+                <div className="flex items-center justify-center gap-4 py-2">
+                  <button onClick={() => { const p = Math.max(1, mpPage - 1); setMpPage(p); fetchMateriaPrimas(p, mpSearch); }} disabled={mpPage === 1}
+                    className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm disabled:opacity-30">Anterior</button>
+                  <span className="text-xs text-zinc-500">Pág {mpPage} de {mpTotalPages}</span>
+                  <button onClick={() => { const p = Math.min(mpTotalPages, mpPage + 1); setMpPage(p); fetchMateriaPrimas(p, mpSearch); }} disabled={mpPage === mpTotalPages}
+                    className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm disabled:opacity-30">Siguiente</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Modal MP (Crear/Editar) */}
+          {mpModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+              <div className="w-full max-w-md bg-zinc-900 border border-white/10 rounded-3xl p-6 space-y-4">
+                <div className="flex justify-between items-center">
+                  <h2 className="font-bold text-lg">{mpModal === 'crear' ? 'Nueva Materia Prima' : 'Editar Materia Prima'}</h2>
+                  <button onClick={() => setMpModal(null)} className="text-zinc-400 hover:text-white"><X className="w-5 h-5" /></button>
+                </div>
+                <form onSubmit={async e => {
+                  e.preventDefault();
+                  const url = mpEditing ? `${API_URL}/admin/materias-primas/${mpEditing.id}` : `${API_URL}/admin/materias-primas`;
+                  const method = mpEditing ? 'PUT' : 'POST';
+                  try {
+                    const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(mpForm) });
+                    const d = await res.json();
+                    if (d.success) { setMpModal(null); fetchMateriaPrimas(mpPage, mpSearch); } else alert(d.message || JSON.stringify(d));
+                  } catch (err: any) { alert(err?.message || 'Error al guardar'); }
+                }} className="space-y-4">
+                  <div><label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">Nombre</label>
+                    <input required value={mpForm.nombre} onChange={e => setMpForm({...mpForm, nombre: e.target.value})} className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-red" /></div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">Costo de compra ($)</label>
+                      <input type="number" step="0.01" required value={mpForm.precio} onChange={e => setMpForm({...mpForm, precio: Number(e.target.value)})} placeholder="Ej: 25000" className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-red" /></div>
+                    <div><label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">Presentación / Cantidad</label>
+                      <input type="number" step="0.01" required value={mpForm.peso} onChange={e => setMpForm({...mpForm, peso: Number(e.target.value)})} placeholder="Ej: 25" className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-red" /></div>
+                  </div>
+                  <div><label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">Unidad de medida</label>
+                    <select value={mpForm.unidad_medida} onChange={e => setMpForm({...mpForm, unidad_medida: e.target.value})} className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-red">
+                      {['kg','g','lt','ml','unidades','paquetes','cajas','bidones','bolsas'].map(u => <option key={u} value={u} className="bg-zinc-900">{u}</option>)}
+                    </select>
+                  </div>
+                  <div className="bg-white/5 border border-white/10 rounded-xl p-3 text-[11px] text-zinc-400 leading-relaxed">
+                    💡 <strong>Cálculo de costo por unidad:</strong> Si comprás una bolsa de <strong>25 kg</strong> a <strong>$25.000</strong>, poné Costo: <code>25000</code> y Presentación: <code>25</code> (unidad: <code>kg</code>). Las recetas calcularán automáticamente <strong>${mpForm.peso > 0 ? (mpForm.precio / mpForm.peso).toFixed(2) : '0.00'} por {mpForm.unidad_medida || 'kg'}</strong>.
+                  </div>
+                  <button type="submit" className="w-full bg-brand-red text-white h-11 rounded-xl font-bold shadow-lg shadow-brand-red/20">{mpEditing ? 'Guardar Cambios' : 'Crear'}</button>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* ── RECETAS ── */}
+          {activeTab === "recetas" && isAdmin && (
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <h1 className="text-2xl font-bold">Recetas de Producción</h1>
+                <button onClick={() => { 
+                  if (depositoArticulos.length === 0) fetchDeposito();
+                  if (materiaPrimas.length === 0) fetchMateriaPrimas(1, '');
+                  setRecetaForm({ nombre: '', descripcion: '', porciones: 1, id_articulo_resultado: '' }); 
+                  setRecetaIngredientes([]); 
+                  setRecetaEditing(null); 
+                  setRecetaModal('crear'); 
+                }}
+                  className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-emerald-500/20 transition-colors shrink-0">
+                  <Plus className="w-4 h-4" /> Nueva Receta
+                </button>
+              </div>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                <input type="text" placeholder="Buscar recetas..." value={recetaSearch}
+                  onChange={e => { setRecetaSearch(e.target.value); fetchRecetas(e.target.value); }}
+                  className="w-full h-10 pl-9 pr-4 rounded-xl bg-white/5 border border-white/10 text-sm text-white focus:border-brand-red outline-none" />
+              </div>
+              {loadingRecetas ? <p className="text-center text-zinc-500 py-8">Cargando...</p> : (
+                <div className="space-y-3">
+                  {recetas.map((r: any) => (
+                    <div key={r.id} className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-white">{r.nombre}</p>
+                          {r.descripcion && <p className="text-xs text-zinc-400 mt-0.5">{r.descripcion}</p>}
+                          <div className="flex flex-wrap gap-3 text-xs text-zinc-400 mt-1">
+                            <span>Porciones: <strong className="text-zinc-200">{r.porciones}</strong></span>
+                            <span>Ingredientes: <strong className="text-zinc-200">{r.ingredientes?.length ?? 0}</strong></span>
+                            <span>Costo total: <strong className="text-brand-yellow">${r.costo_total?.toFixed(2) ?? '0.00'}</strong></span>
+                            {r.articulo_resultado && <span>→ <strong className="text-emerald-300">{r.articulo_resultado.nombre}</strong></span>}
+                          </div>
+                        </div>
+                        <div className="flex gap-2 shrink-0 flex-wrap">
+                          <button onClick={() => { setRecetaEjecutarModal(r); setRecetaEjecutarQty(1); }}
+                            className="text-xs px-3 py-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-lg hover:bg-emerald-500/20 transition-colors font-semibold">
+                            ▶ Ejecutar
+                          </button>
+                          <button onClick={() => {
+                            if (depositoArticulos.length === 0) fetchDeposito();
+                            if (materiaPrimas.length === 0) fetchMateriaPrimas(1, '');
+                            setRecetaForm({ nombre: r.nombre, descripcion: r.descripcion ?? '', porciones: r.porciones, id_articulo_resultado: r.id_articulo_resultado ?? '' });
+                            setRecetaIngredientes(r.ingredientes?.map((i: any) => {
+                              const mpInfo = allMateriasPrimas.find((mp: any) => String(mp.id) === String(i.id_materia_prima));
+                              return { 
+                                id_materia_prima: i.id_materia_prima, 
+                                nombre: i.nombre, 
+                                cantidad: i.cantidad, 
+                                unidad: i.unidad,
+                                precio: i.precio || mpInfo?.precio || 0,
+                                peso: i.peso || mpInfo?.peso || 1,
+                              };
+                            }) ?? []);
+                            setRecetaEditing(r); setRecetaModal('editar');
+                          }} className="text-xs px-3 py-1.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-lg hover:bg-blue-500/20 transition-colors">
+                            <Edit2 className="w-3 h-3 inline mr-1" />Editar
+                          </button>
+                          <button onClick={async () => {
+                            if (!confirm(`¿Eliminar receta "${r.nombre}"?`)) return;
+                            const res = await fetch(`${API_URL}/admin/recetas/${r.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+                            const d = await res.json();
+                            if (d.success) fetchRecetas(recetaSearch); else alert(d.message);
+                          }} className="text-xs px-3 py-1.5 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors">
+                            <Trash2 className="w-3 h-3 inline mr-1" />Eliminar
+                          </button>
+                        </div>
+                      </div>
+                      {r.ingredientes?.length > 0 && (
+                        <div className="border-t border-white/5 pt-2 grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                          {r.ingredientes.map((ing: any, idx: number) => (
+                            <div key={idx} className="bg-black/20 rounded-lg px-2 py-1 text-xs flex justify-between">
+                              <span className="text-zinc-300 truncate">{ing.nombre}</span>
+                              <span className="text-zinc-400 ml-2 shrink-0">{ing.cantidad} {ing.unidad}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {recetas.length === 0 && <p className="text-center text-zinc-500 py-8">No hay recetas cargadas.</p>}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Modal Receta (Crear/Editar) */}
+          {recetaModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+              <div className="w-full max-w-2xl bg-zinc-900 border border-white/10 rounded-3xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+                <div className="flex justify-between items-center">
+                  <h2 className="font-bold text-lg">{recetaModal === 'crear' ? 'Nueva Receta' : 'Editar Receta'}</h2>
+                  <button onClick={() => setRecetaModal(null)} className="text-zinc-400 hover:text-white"><X className="w-5 h-5" /></button>
+                </div>
+                <form onSubmit={async e => {
+                  e.preventDefault();
+                  if (recetaIngredientes.length === 0) { alert('Agregá al menos un ingrediente.'); return; }
+
+                  const parsedIngredientes = recetaIngredientes.map(i => ({
+                    ...i,
+                    cantidad: parseFloat(String(i.cantidad).replace(',', '.')) || 0,
+                  }));
+
+                  if (parsedIngredientes.some(i => i.cantidad <= 0)) {
+                    alert('La cantidad de cada ingrediente debe ser mayor a 0');
+                    return;
+                  }
+
+                  const url = recetaEditing ? `${API_URL}/admin/recetas/${recetaEditing.id}` : `${API_URL}/admin/recetas`;
+                  const method = recetaEditing ? 'PUT' : 'POST';
+                  try {
+                    const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                      body: JSON.stringify({ 
+                        ...recetaForm, 
+                        porciones: parseFloat(String(recetaForm.porciones).replace(',', '.')) || 1,
+                        id_articulo_resultado: recetaForm.id_articulo_resultado || null, 
+                        ingredientes: parsedIngredientes 
+                      }) 
+                    });
+                    const d = await res.json();
+                    if (d.success) { setRecetaModal(null); fetchRecetas(recetaSearch); } else alert(d.message || JSON.stringify(d));
+                  } catch (err: any) { alert(err?.message || 'Error al guardar'); }
+                }} className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="sm:col-span-2"><label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">Nombre de la receta</label>
+                      <input required value={recetaForm.nombre} onChange={e => setRecetaForm({...recetaForm, nombre: e.target.value})} className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-red" /></div>
+                    <div><label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">Porciones producidas</label>
+                      <input type="text" inputMode="decimal" required value={recetaForm.porciones} onChange={e => setRecetaForm({...recetaForm, porciones: e.target.value})} className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-red font-semibold" /></div>
+                    <div><label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">Artículo que produce</label>
+                      <select value={recetaForm.id_articulo_resultado} onChange={e => setRecetaForm({...recetaForm, id_articulo_resultado: e.target.value})} className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-red">
+                        <option value="" className="bg-zinc-900">Sin asignar</option>
+                        {depositoArticulos.map((a: any) => <option key={a.id} value={a.id} className="bg-zinc-900">{a.nombre}</option>)}
+                      </select></div>
+                    <div className="sm:col-span-2"><label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">Descripción (opcional)</label>
+                      <input value={recetaForm.descripcion} onChange={e => setRecetaForm({...recetaForm, descripcion: e.target.value})} className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-red" /></div>
+                  </div>
+                  <div className="border-t border-white/10 pt-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="text-xs text-zinc-400 uppercase tracking-widest font-semibold">Ingredientes</p>
+                      {allMateriasPrimas.length === 0 && (
+                        <button type="button" onClick={() => { fetchDeposito(); fetchMateriaPrimas(1, ''); }} className="text-xs text-brand-yellow hover:underline">
+                          Recargar materias primas
+                        </button>
+                      )}
+                    </div>
+                    <div className="relative mb-3">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500" />
+                      <input
+                        placeholder="Buscar materia prima para agregar..."
+                        value={recetaIngSearch}
+                        onChange={e => setRecetaIngSearch(e.target.value)}
+                        className="w-full h-10 pl-9 pr-3 rounded-xl bg-white/5 border border-white/10 text-xs text-white outline-none focus:border-brand-red"
+                      />
+                    </div>
+                    {(recetaIngSearch.trim().length > 0 || (allMateriasPrimas.length > 0 && recetaIngredientes.length === 0)) && (
+                      <div className="bg-black/40 border border-white/10 rounded-xl mb-3 max-h-48 overflow-y-auto divide-y divide-white/5">
+                        {allMateriasPrimas
+                          .filter((mp: any) => {
+                            if (recetaIngredientes.some(i => String(i.id_materia_prima) === String(mp.id))) return false;
+                            const term = recetaIngSearch.toLowerCase().trim();
+                            if (!term) return true;
+                            const name = (mp.nombre || '').toLowerCase();
+                            return name.includes(term);
+                          })
+                          .map((mp: any) => (
+                            <button
+                              type="button"
+                              key={mp.id}
+                              onClick={() => {
+                                setRecetaIngredientes([
+                                  ...recetaIngredientes,
+                                  { 
+                                    id_materia_prima: mp.id, 
+                                    nombre: mp.nombre, 
+                                    cantidad: 1, 
+                                    unidad: mp.unidad_medida || 'kg',
+                                    precio: Number(mp.precio) || 0,
+                                    peso: Number(mp.peso) > 0 ? Number(mp.peso) : 1,
+                                  }
+                                ]);
+                                setRecetaIngSearch('');
+                              }}
+                              className="w-full text-left px-3 py-2.5 text-xs hover:bg-white/10 text-zinc-300 flex justify-between items-center transition-colors"
+                            >
+                              <div className="flex flex-col">
+                                <span className="font-medium text-white">{mp.nombre}</span>
+                                <span className="text-[10px] text-zinc-500">
+                                  {Number(mp.precio) > 0 ? `$${(Number(mp.precio) / (Number(mp.peso) || 1)).toFixed(2)} por ${mp.unidad_medida || 'kg'}` : 'Sin precio cargado ($0.00)'}
+                                </span>
+                              </div>
+                              <span className="text-zinc-400 text-[11px]">
+                                depósito: <strong className="text-emerald-400">{mp.stock_deposito} {mp.unidad_medida || 'kg'}</strong>
+                              </span>
+                            </button>
+                          ))}
+                        {allMateriasPrimas.filter((mp: any) => {
+                          if (recetaIngredientes.some(i => String(i.id_materia_prima) === String(mp.id))) return false;
+                          const term = recetaIngSearch.toLowerCase().trim();
+                          if (!term) return true;
+                          return (mp.nombre || '').toLowerCase().includes(term);
+                        }).length === 0 && (
+                          <p className="text-center text-zinc-500 text-xs py-3">No se encontraron materias primas que coincidan</p>
+                        )}
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      {recetaIngredientes.map((ing, idx) => {
+                        const cantNum = parseFloat(String(ing.cantidad).replace(',', '.')) || 0;
+                        const p = Number(ing.precio) || 0;
+                        const w = Number(ing.peso) > 0 ? Number(ing.peso) : 1;
+                        const unitCost = p / w;
+                        const subtotalCost = cantNum * unitCost;
+
+                        return (
+                          <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white/5 border border-white/10 rounded-xl p-3">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs text-zinc-200 font-semibold truncate">{ing.nombre}</p>
+                              <p className="text-[11px] text-zinc-400">
+                                {p > 0 ? (
+                                  <>Costo base: <span className="text-zinc-300 font-mono">${unitCost.toFixed(2)}</span> por {ing.unidad}</>
+                                ) : (
+                                  <span className="text-amber-400/80">Sin precio cargado en MP ($0.00)</span>
+                                )}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <div className="flex items-center gap-1 bg-black/40 border border-white/10 rounded-lg px-2 py-1">
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={ing.cantidad}
+                                  onChange={e => {
+                                    const val = e.target.value;
+                                    const upd = [...recetaIngredientes];
+                                    upd[idx].cantidad = val;
+                                    setRecetaIngredientes(upd);
+                                  }}
+                                  placeholder="0"
+                                  className="w-16 bg-transparent text-sm text-white outline-none text-right font-bold"
+                                />
+                                <span className="text-xs text-zinc-400 pl-1">{ing.unidad}</span>
+                              </div>
+                              <div className="w-20 text-right">
+                                <p className="text-[10px] text-zinc-500 uppercase font-mono">Subtotal</p>
+                                <p className="text-xs font-bold text-brand-yellow font-mono">
+                                  ${subtotalCost.toFixed(2)}
+                                </p>
+                              </div>
+                              <button type="button" onClick={() => setRecetaIngredientes(recetaIngredientes.filter((_, i) => i !== idx))} className="text-zinc-500 hover:text-red-400 p-1 transition-colors">
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {recetaIngredientes.length === 0 && <p className="text-xs text-zinc-500 text-center py-2">Buscá y agregá ingredientes arriba</p>}
+                    </div>
+
+                    {/* Resumen de costos de la receta en tiempo real */}
+                    {recetaIngredientes.length > 0 && (() => {
+                      const totalCosto = recetaIngredientes.reduce((acc, ing) => {
+                        const cantNum = parseFloat(String(ing.cantidad).replace(',', '.')) || 0;
+                        const p = Number(ing.precio) || 0;
+                        const w = Number(ing.peso) > 0 ? Number(ing.peso) : 1;
+                        return acc + (cantNum * (p / w));
+                      }, 0);
+                      const porcionesNum = parseFloat(String(recetaForm.porciones).replace(',', '.')) || 1;
+                      const costoPorPorcion = totalCosto / Math.max(0.01, porcionesNum);
+
+                      return (
+                        <div className="mt-3 bg-gradient-to-r from-amber-500/10 via-brand-red/10 to-transparent border border-brand-yellow/20 rounded-2xl p-3.5 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-zinc-300 font-semibold">Costo Total Estimado de la Receta:</span>
+                            <span className="text-base font-black text-brand-yellow font-mono">${totalCosto.toFixed(2)}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-xs text-zinc-400">
+                            <span>Costo por porción producida ({porcionesNum} {porcionesNum === 1 ? 'porción' : 'porciones'}):</span>
+                            <span className="font-bold text-white font-mono">${costoPorPorcion.toFixed(2)}</span>
+                          </div>
+                          <p className="text-[11px] text-zinc-400/90 leading-tight pt-1.5 border-t border-white/5">
+                            💡 <strong>¿De dónde sale este costo?</strong> Se calcula automáticamente a partir del precio de compra de cada materia prima: <code className="text-zinc-300 bg-white/5 px-1 py-0.5 rounded">(Cantidad × Precio) ÷ Presentación</code>. Podés actualizar los costos base desde la pestaña <em>Materias Primas</em>.
+                          </p>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                  <button type="submit" className="w-full bg-brand-red text-white h-11 rounded-xl font-bold shadow-lg shadow-brand-red/20">{recetaEditing ? 'Guardar Cambios' : 'Crear Receta'}</button>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Modal Ejecutar Receta */}
+          {recetaEjecutarModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+              <div className="w-full max-w-md bg-zinc-900 border border-white/10 rounded-3xl p-6 space-y-4">
+                <div className="flex justify-between items-center">
+                  <h2 className="font-bold text-lg">▶ Ejecutar Receta</h2>
+                  <button onClick={() => setRecetaEjecutarModal(null)} className="text-zinc-400 hover:text-white"><X className="w-5 h-5" /></button>
+                </div>
+                <div className="bg-white/5 border border-white/10 rounded-xl p-3 space-y-1">
+                  <p className="font-semibold text-white">{recetaEjecutarModal.nombre}</p>
+                  <p className="text-xs text-zinc-400">{recetaEjecutarModal.porciones} porciones por ejecución → <strong className="text-emerald-300">{recetaEjecutarModal.articulo_resultado?.nombre ?? 'Sin artículo asignado'}</strong></p>
+                </div>
+                <div>
+                  <label className="text-xs text-zinc-400 uppercase tracking-widest mb-2 block">¿Cuántas veces ejecutar?</label>
+                  <input type="number" min="1" value={recetaEjecutarQty} onChange={e => setRecetaEjecutarQty(Number(e.target.value))} className="w-full h-14 rounded-xl bg-white/5 border border-white/10 px-4 text-2xl font-bold text-center text-white outline-none focus:border-emerald-400" />
+                  <p className="text-xs text-zinc-500 mt-1 text-center">Producirá {(recetaEjecutarModal.porciones * recetaEjecutarQty).toFixed(2)} unidades al depósito</p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-zinc-400 font-semibold uppercase tracking-widest">Consumo de MP:</p>
+                  {recetaEjecutarModal.ingredientes?.map((ing: any, i: number) => (
+                    <div key={i} className="flex justify-between text-xs">
+                      <span className="text-zinc-300">{ing.nombre}</span>
+                      <span className={`font-semibold ${ing.stock_deposito >= ing.cantidad * recetaEjecutarQty ? 'text-emerald-300' : 'text-red-400'}`}>
+                        {(ing.cantidad * recetaEjecutarQty).toFixed(2)} {ing.unidad} (disp: {ing.stock_deposito})
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <button onClick={async () => {
+                  try {
+                    const res = await fetch(`${API_URL}/admin/recetas/${recetaEjecutarModal.id}/ejecutar`, {
+                      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                      body: JSON.stringify({ cantidad_ejecuciones: recetaEjecutarQty })
+                    });
+                    const d = await res.json();
+                    if (d.success) { setRecetaEjecutarModal(null); alert(d.message); fetchRecetas(recetaSearch); fetchDeposito(); }
+                    else { alert(d.message + (d.faltantes ? '\n' + d.faltantes.join('\n') : '')); }
+                  } catch { alert('Error de conexión'); }
+                }} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white h-12 rounded-xl font-bold transition-colors">
+                  ✓ Confirmar Producción
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* ── CLIENTES ── */}
           {activeTab === "clientes" && !isVendedor && (
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <h1 className="text-2xl font-bold">Clientes {isAdmin ? "(Saldos & Gestión)" : ""}</h1>
+                <div className="flex items-center justify-between w-full sm:w-auto gap-3">
+                  <h1 className="text-2xl font-bold">Clientes {isAdmin ? "(Saldos & Gestión)" : ""}</h1>
+                  {!isAdmin && (
+                    <button
+                      onClick={() => {
+                        setPersonaForm({ nombre: "", tipo_persona: "cliente", direccion: "", telefono: "", mail: "", user_id: "" });
+                        setEditingPersona({});
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-2 bg-brand-red hover:bg-red-600 rounded-xl text-xs font-bold text-white transition-all shadow-md shadow-brand-red/20 shrink-0"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>+ Nuevo Cliente</span>
+                    </button>
+                  )}
+                </div>
                 
                 {isAdmin && (
                   <div className="flex bg-black/20 p-1 rounded-xl border border-white/5 self-start sm:self-auto shrink-0">
@@ -2966,9 +3906,17 @@ export default function BakeryDriverApp() {
                                 {m.motivo && <p className="text-[10px] text-zinc-600 italic">"{m.motivo}"</p>}
                               </div>
                             </div>
-                            <div className="text-right shrink-0">
+                            <div className="text-right shrink-0 flex flex-col items-end justify-center">
                               <p className="font-bold text-white">{m.cantidad} u.</p>
-                              <p className="text-[10px] text-zinc-500">{m.fecha} · {m.user}</p>
+                              <p className="text-[10px] text-zinc-500 mb-1">{m.fecha} · {m.user}</p>
+                              {m.tipo_movimiento === 'entrada' && (
+                                <button 
+                                  onClick={() => { setDepositoModal('editar_entrada'); setDepositoModalItem(m); }}
+                                  className="text-[10px] text-zinc-400 hover:text-brand-yellow flex items-center gap-1 transition-colors"
+                                >
+                                  <Edit2 className="w-3 h-3" /> Editar
+                                </button>
+                              )}
                             </div>
                           </div>
                         );
@@ -3004,6 +3952,7 @@ export default function BakeryDriverApp() {
                     <div className="flex items-center justify-between mb-5">
                       <h2 className="text-lg font-bold">
                         {depositoModal === 'entrada' ? '+ Registrar Entrada al Depósito' :
+                         depositoModal === 'editar_entrada' ? 'Editar Entrada (ID: ' + depositoModalItem?.id + ')' :
                          depositoModal === 'distribuir' ? '→ Distribuir desde Depósito' :
                          depositoModal === 'devolucion' ? '← Devolver al Depósito' :
                          '↓ Salida de Materia Prima'}
@@ -3015,9 +3964,14 @@ export default function BakeryDriverApp() {
                     <form onSubmit={async (e) => {
                       e.preventDefault();
                       const fd = new FormData(e.target as HTMLFormElement);
+                      const itemId = fd.get('item_id');
+                      if (depositoModal !== 'editar_entrada' && !itemId) {
+                        alert('Por favor seleccioná un ítem');
+                        return;
+                      }
                       const body: any = {
                         tipo_item: fd.get('tipo_item'),
-                        item_id: fd.get('item_id'),
+                        item_id: itemId,
                         motivo: fd.get('motivo') || undefined,
                       };
 
@@ -3030,17 +3984,23 @@ export default function BakeryDriverApp() {
                       }
 
                       const url = depositoModal === 'entrada' ? `${API_URL}/deposito/entrada` :
+                                  depositoModal === 'editar_entrada' ? `${API_URL}/deposito/movimientos/${depositoModalItem.id}` :
                                   depositoModal === 'distribuir' ? `${API_URL}/deposito/distribuir` :
                                   depositoModal === 'devolucion' ? `${API_URL}/deposito/devolucion` :
                                   `${API_URL}/deposito/mp/salida`;
+                      const method = depositoModal === 'editar_entrada' ? 'PUT' : 'POST';
                       try {
                         const res = await fetch(url, {
-                          method: 'POST',
+                          method,
                           headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', Authorization: `Bearer ${token}` },
                           body: JSON.stringify(body),
                         });
                         const data = await res.json();
-                        if (data.success) { setDepositoModal(null); fetchDeposito(); }
+                        if (data.success) { 
+                          setDepositoModal(null); 
+                          fetchDeposito(); 
+                          if (depositoSubTab === 'historial') fetchDepositoMovimientos();
+                        }
                         else { alert(data.message || 'Error'); }
                       } catch { alert('Error de conexión'); }
                     }} className="space-y-4">
@@ -3049,14 +4009,71 @@ export default function BakeryDriverApp() {
                         <label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">
                           {depositoModal === 'salida_mp' ? 'Materia Prima' : 'Producto'}
                         </label>
-                        <select name="item_id" required defaultValue={depositoModalItem?.id ?? ''}
-                          className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-red">
-                          <option value="" className="text-black bg-white">Seleccioná un ítem</option>
-                          {depositoModal === 'salida_mp' || (depositoModal === 'distribuir' && depositoModalItem?.tipo === 'materia_prima')
-                            ? depositoMP.map((mp: any) => <option key={mp.id} value={mp.id} className="text-black bg-white">{mp.nombre} (depósito: {mp.stock_deposito})</option>)
-                            : depositoArticulos.map((a: any) => <option key={a.id} value={a.id} className="text-black bg-white">{a.nombre} (depósito: {a.stock_deposito})</option>)
-                          }
-                        </select>
+                        {depositoModal === 'editar_entrada' ? (
+                          <div className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 flex items-center text-sm text-zinc-300">
+                            {depositoModalItem?.item_nombre}
+                          </div>
+                        ) : depositoModalSelectedId && depositoModalSelectedItemObj ? (
+                          <div className="flex items-center justify-between w-full p-3 rounded-xl bg-white/5 border border-white/10">
+                            <div className="min-w-0 flex-1 pr-2">
+                              <p className="text-sm font-semibold text-white truncate">{depositoModalSelectedItemObj.nombre}</p>
+                              <p className="text-xs text-zinc-400">
+                                En depósito: <strong className="text-emerald-400">{depositoModalSelectedItemObj.stock_deposito} {depositoModalSelectedItemObj.unidad_medida || 'unidades'}</strong>
+                              </p>
+                            </div>
+                            {!depositoModalItem?.id && (
+                              <button
+                                type="button"
+                                onClick={() => { setDepositoModalSelectedId(''); setDepositoModalItemSearch(''); }}
+                                className="text-xs px-2.5 py-1 bg-white/10 hover:bg-white/20 rounded-lg text-brand-yellow transition-colors shrink-0"
+                              >
+                                Cambiar
+                              </button>
+                            )}
+                            <input type="hidden" name="item_id" value={depositoModalSelectedId} />
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <div className="relative">
+                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                              <input
+                                type="text"
+                                placeholder={`Buscar ${depositoModal === 'salida_mp' || depositoModalItem?.tipo === 'materia_prima' ? 'materia prima' : 'producto'}...`}
+                                value={depositoModalItemSearch}
+                                onChange={e => setDepositoModalItemSearch(e.target.value)}
+                                className="w-full h-11 pl-9 pr-4 rounded-xl bg-white/5 border border-white/10 text-sm text-white focus:border-brand-red outline-none"
+                                autoFocus
+                              />
+                            </div>
+                            <div className="max-h-48 overflow-y-auto rounded-xl border border-white/10 bg-black/40 divide-y divide-white/5">
+                              {depositoModalItemsList
+                                .filter(item => {
+                                  const term = depositoModalItemSearch.toLowerCase().trim();
+                                  if (!term) return true;
+                                  const name = (item.nombre || item.producto || '').toLowerCase();
+                                  return name.includes(term);
+                                })
+                                .map(item => (
+                                  <button
+                                    key={item.id}
+                                    type="button"
+                                    onClick={() => setDepositoModalSelectedId(item.id)}
+                                    className="w-full text-left px-4 py-2.5 hover:bg-white/10 flex justify-between items-center text-sm transition-colors"
+                                  >
+                                    <span className="text-zinc-200 font-medium truncate mr-2">{item.nombre}</span>
+                                    <span className="text-xs text-zinc-400 shrink-0">
+                                      depósito: <strong className="text-emerald-400">{item.stock_deposito} {item.unidad_medida || ''}</strong>
+                                    </span>
+                                  </button>
+                                ))
+                              }
+                              {depositoModalItemsList.filter(item => (item.nombre || item.producto || '').toLowerCase().includes(depositoModalItemSearch.toLowerCase().trim())).length === 0 && (
+                                <p className="text-center text-zinc-500 text-xs py-4">No se encontraron ítems</p>
+                              )}
+                            </div>
+                            <input type="hidden" name="item_id" value="" />
+                          </div>
+                        )}
                         <input type="hidden" name="tipo_item" value={depositoModal === 'salida_mp' || depositoModalItem?.tipo === 'materia_prima' ? 'materia_prima' : 'articulo'} />
                       </div>
                       
@@ -3085,10 +4102,11 @@ export default function BakeryDriverApp() {
                       )}
 
                       {/* Cantidad Única (solo entrada o salida mp) */}
-                      {(depositoModal === 'entrada' || depositoModal === 'salida_mp') && (
+                      {(depositoModal === 'entrada' || depositoModal === 'editar_entrada' || depositoModal === 'salida_mp') && (
                         <div>
                           <label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">Cantidad</label>
                           <input name="cantidad" type="number" step="0.01" min="0.01" required placeholder="Ej: 100"
+                            defaultValue={depositoModal === 'editar_entrada' ? depositoModalItem?.cantidad : undefined}
                             className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-red" />
                         </div>
                       )}
@@ -3098,6 +4116,7 @@ export default function BakeryDriverApp() {
                           Motivo / Nota {depositoModal === 'salida_mp' ? '(obligatorio)' : '(opcional)'}
                         </label>
                         <input name="motivo" type="text" required={depositoModal === 'salida_mp'} placeholder="Ej: Compra proveedor XYZ / producción del lunes"
+                          defaultValue={depositoModal === 'editar_entrada' ? depositoModalItem?.motivo : undefined}
                           className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-red" />
                       </div>
                       <div className="flex gap-3 pt-2">
@@ -3223,32 +4242,54 @@ export default function BakeryDriverApp() {
                 <>
                   {isAdmin && historyCajas.length > 0 && (
                     <div className="mb-6 space-y-3">
-                      <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider">Cajas por Usuario</h3>
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider">Cajas (Panadería y Móviles)</h3>
+                        <span className="text-xs text-zinc-500 font-medium">{historyCajas.length} activas</span>
+                      </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {historyCajas.map((caja: any) => (
-                          <div
-                            key={caja.user_id}
-                            onClick={() => setSelectedCaja(caja)}
-                            className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-2 cursor-pointer transition-all hover:bg-white/10 hover:border-white/20 active:scale-[0.98]">
-                            <p className="font-bold text-white mb-2 pb-2 border-b border-white/10">📦 {caja.user_name}</p>
-                            <div className="flex justify-between items-center text-sm">
-                              <span className="text-zinc-400">💵 Efectivo a Rendir</span>
-                              <span className="font-bold text-emerald-400">${caja.total_efectivo.toLocaleString('es-AR')}</span>
+                        {historyCajas.map((caja: any) => {
+                          const isPanaderia = caja.tipo_caja === 'panaderia';
+                          return (
+                            <div
+                              key={caja.caja_id || caja.user_id}
+                              onClick={() => setSelectedCaja(caja)}
+                              className={`rounded-2xl border p-4 space-y-2 cursor-pointer transition-all active:scale-[0.98] ${
+                                isPanaderia 
+                                  ? 'border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10 hover:border-amber-500/50' 
+                                  : 'border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20'
+                              }`}>
+                              <div className="flex justify-between items-center mb-2 pb-2 border-b border-white/10">
+                                <p className="font-bold text-white truncate">{caja.user_name}</p>
+                                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
+                                  isPanaderia ? 'bg-amber-400/20 text-amber-300' : 'bg-blue-400/20 text-blue-300'
+                                }`}>
+                                  {isPanaderia ? 'Local / Mostrador' : 'Móvil / Reparto'}
+                                </span>
+                              </div>
+                              <div className="flex justify-between items-center text-sm">
+                                <span className="text-zinc-400">💵 Efectivo a Rendir</span>
+                                <span className="font-bold text-emerald-400">${caja.total_efectivo.toLocaleString('es-AR')}</span>
+                              </div>
+                              <div className="flex justify-between items-center text-sm">
+                                <span className="text-zinc-400">🏦 Transferencias</span>
+                                <span className="font-bold text-blue-400">${caja.total_transferencia.toLocaleString('es-AR')}</span>
+                              </div>
+                              <div className="flex justify-between items-center text-sm">
+                                <span className="text-zinc-400">📝 Pendiente (Fiado)</span>
+                                <span className="font-bold text-red-400">${caja.total_saldo.toLocaleString('es-AR')}</span>
+                              </div>
+                              <div className="flex justify-between items-center text-xs pt-2 mt-2 border-t border-white/5">
+                                <span className="text-zinc-500">🛒 Total Vendido</span>
+                                <span className="font-semibold text-zinc-300">
+                                  ${caja.total_facturado.toLocaleString('es-AR')}
+                                  {caja.total_movimientos !== undefined && (
+                                    <span className="text-zinc-500 ml-1.5 font-normal">({caja.total_movimientos} mov.)</span>
+                                  )}
+                                </span>
+                              </div>
                             </div>
-                            <div className="flex justify-between items-center text-sm">
-                              <span className="text-zinc-400">🏦 Transferencias</span>
-                              <span className="font-bold text-blue-400">${caja.total_transferencia.toLocaleString('es-AR')}</span>
-                            </div>
-                            <div className="flex justify-between items-center text-sm">
-                              <span className="text-zinc-400">📝 Pendiente (Fiado)</span>
-                              <span className="font-bold text-red-400">${caja.total_saldo.toLocaleString('es-AR')}</span>
-                            </div>
-                            <div className="flex justify-between items-center text-xs pt-2 mt-2 border-t border-white/5">
-                              <span className="text-zinc-500">🛒 Total Vendido</span>
-                              <span className="font-semibold text-zinc-300">${caja.total_facturado.toLocaleString('es-AR')}</span>
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -3552,10 +4593,29 @@ export default function BakeryDriverApp() {
         pedidoItems={pedidoCheckout?.items}
         pedidoCliente={pedidoCheckout?.cliente ?? null}
         isEditing={!!editingPedido}
+        onClientCreated={(newClient) => {
+          setClients(prev => {
+            const exists = prev.some(c => c.id === newClient.id);
+            if (exists) return prev;
+            return [newClient, ...prev];
+          });
+          fetchAllData(token!, false);
+        }}
         onSuccess={() => {
           setCart({});
           setEditingPedido(null);
           fetchAllData(token!, false);
+        }}
+      />
+
+      {/* ── Categorias Modal ── */}
+      <CategoriasModal
+        open={categoriasModalOpen}
+        onClose={() => setCategoriasModalOpen(false)}
+        token={token!}
+        onRefresh={() => {
+          fetchAllData(token!, false);
+          setAdminStockRefresh(prev => prev + 1);
         }}
       />
 
@@ -3591,7 +4651,7 @@ export default function BakeryDriverApp() {
           <div className="bg-[#1a1a1a] border border-white/10 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
             <div className="flex items-center justify-between p-4 border-b border-white/10">
               <h2 className="text-lg font-bold text-white">
-                {editingPersona.idpersona ? "Editar Persona" : "Nueva Persona"}
+                {editingPersona.idpersona ? "Editar Persona" : (isAdmin ? "Nueva Persona" : "Nuevo Cliente")}
               </h2>
               <button 
                 onClick={() => setEditingPersona(null)} 
@@ -3602,22 +4662,24 @@ export default function BakeryDriverApp() {
             </div>
             
             <form onSubmit={handleSavePersona} className="p-4 flex flex-col gap-4 overflow-y-auto">
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-zinc-400">Tipo de Persona</label>
-                <select 
-                  value={personaForm.tipo_persona} 
-                  onChange={e => setPersonaForm({...personaForm, tipo_persona: e.target.value})}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-brand-red outline-none transition-colors appearance-none"
-                  required
-                >
-                  <option value="cliente" className="bg-[#1a1a1a] text-white">Cliente</option>
-                  <option value="proveedor" className="bg-[#1a1a1a] text-white">Proveedor</option>
-                  <option value="empleado" className="bg-[#1a1a1a] text-white">Empleado</option>
-                </select>
-              </div>
+              {isAdmin && (
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-zinc-400">Tipo de Persona</label>
+                  <select 
+                    value={personaForm.tipo_persona} 
+                    onChange={e => setPersonaForm({...personaForm, tipo_persona: e.target.value})}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-brand-red outline-none transition-colors appearance-none"
+                    required
+                  >
+                    <option value="cliente" className="bg-[#1a1a1a] text-white">Cliente</option>
+                    <option value="proveedor" className="bg-[#1a1a1a] text-white">Proveedor</option>
+                    <option value="empleado" className="bg-[#1a1a1a] text-white">Empleado</option>
+                  </select>
+                </div>
+              )}
 
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-zinc-400">Nombre Completo</label>
+                <label className="text-xs font-semibold text-zinc-400">Nombre Completo *</label>
                 <input 
                   type="text"
                   value={personaForm.nombre} 
@@ -3661,19 +4723,21 @@ export default function BakeryDriverApp() {
                 />
               </div>
 
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-zinc-400">Usuario Asociado (Opcional)</label>
-                <select 
-                  value={personaForm.user_id} 
-                  onChange={e => setPersonaForm({...personaForm, user_id: e.target.value})}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-brand-red outline-none transition-colors appearance-none"
-                >
-                  <option value="" className="bg-[#1a1a1a] text-white">-- Sin usuario --</option>
-                  {adminUsers.map(u => (
-                    <option key={u.id} value={u.id} className="bg-[#1a1a1a] text-white">{u.name} ({u.email})</option>
-                  ))}
-                </select>
-              </div>
+              {isAdmin && (
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-zinc-400">Usuario Asociado (Opcional)</label>
+                  <select 
+                    value={personaForm.user_id} 
+                    onChange={e => setPersonaForm({...personaForm, user_id: e.target.value})}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-brand-red outline-none transition-colors appearance-none"
+                  >
+                    <option value="" className="bg-[#1a1a1a] text-white">-- Sin usuario --</option>
+                    {adminUsers.map(u => (
+                      <option key={u.id} value={u.id} className="bg-[#1a1a1a] text-white">{u.name} ({u.email})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div className="mt-2 pt-4 border-t border-white/10 flex gap-3">
                 <button 
@@ -3697,9 +4761,119 @@ export default function BakeryDriverApp() {
         </div>
       )}
 
+      {/* Caja Detail Modal */}
+      {selectedCaja && (
+        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4" onClick={() => setSelectedCaja(null)}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div className="relative w-full max-w-md rounded-t-3xl md:rounded-3xl border-t md:border border-white/10 bg-zinc-950 p-6 pb-10 md:pb-6 shadow-2xl overflow-y-auto transition-all duration-300" style={{ maxHeight: "85vh" }} onClick={e => e.stopPropagation()}>
+            <div className="mx-auto mb-5 h-1 w-12 rounded-full bg-white/20 md:hidden" />
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h2 className="text-xl font-bold text-white">{selectedCaja.user_name}</h2>
+                <p className="text-xs text-zinc-400 mt-0.5">Resumen de caja y listado de movimientos</p>
+              </div>
+              <button onClick={() => setSelectedCaja(null)} className="p-2 rounded-full bg-white/5 border border-white/10">
+                <X className="h-5 w-5 text-zinc-400" />
+              </button>
+            </div>
+
+            {/* Summary Cards */}
+            <div className="grid grid-cols-3 gap-2 mb-6">
+              <div 
+                onClick={() => setCajaFormaPago(cajaFormaPago === 'efectivo' ? '' : 'efectivo')}
+                className={`border rounded-xl p-3 text-center cursor-pointer transition-all ${cajaFormaPago === 'efectivo' ? 'bg-emerald-500/20 border-emerald-400 ring-1 ring-emerald-400' : 'bg-emerald-500/10 border-emerald-500/20 hover:bg-emerald-500/20'}`}>
+                <span className="text-[10px] text-emerald-400/80 uppercase block font-semibold mb-1">Efectivo</span>
+                <span className="text-sm font-bold text-emerald-400">${selectedCaja.total_efectivo.toLocaleString('es-AR')}</span>
+              </div>
+              <div 
+                onClick={() => setCajaFormaPago(cajaFormaPago === 'transferencia' ? '' : 'transferencia')}
+                className={`border rounded-xl p-3 text-center cursor-pointer transition-all ${cajaFormaPago === 'transferencia' ? 'bg-blue-500/20 border-blue-400 ring-1 ring-blue-400' : 'bg-blue-500/10 border-blue-500/20 hover:bg-blue-500/20'}`}>
+                <span className="text-[10px] text-blue-400/80 uppercase block font-semibold mb-1">Transf.</span>
+                <span className="text-sm font-bold text-blue-400">${selectedCaja.total_transferencia.toLocaleString('es-AR')}</span>
+              </div>
+              <div 
+                onClick={() => setCajaFormaPago(cajaFormaPago === 'saldo' ? '' : 'saldo')}
+                className={`border rounded-xl p-3 text-center cursor-pointer transition-all ${cajaFormaPago === 'saldo' ? 'bg-red-500/20 border-red-400 ring-1 ring-red-400' : 'bg-red-500/10 border-red-500/20 hover:bg-red-500/20'}`}>
+                <span className="text-[10px] text-red-400/80 uppercase block font-semibold mb-1">Fiado</span>
+                <span className="text-sm font-bold text-red-400">${selectedCaja.total_saldo.toLocaleString('es-AR')}</span>
+              </div>
+            </div>
+            <div className="mb-6 bg-white/5 border border-white/10 rounded-xl p-3 flex justify-between items-center text-sm">
+              <span className="text-zinc-400 uppercase tracking-widest text-[10px] font-bold">🛒 Total Vendido (Facturado)</span>
+              <span className="font-bold text-zinc-300">${selectedCaja.total_facturado.toLocaleString('es-AR')}</span>
+            </div>
+
+            {/* Sales List Title */}
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-xs text-zinc-500 uppercase tracking-widest">
+                Movimientos ({cajaSales.length})
+              </h3>
+              {cajaFormaPago && (
+                <button
+                  onClick={() => setCajaFormaPago('')}
+                  className="text-[10px] text-zinc-400 hover:text-white underline">
+                  Ver todos
+                </button>
+              )}
+            </div>
+
+            {/* Sales List Container */}
+            <div className="space-y-3 max-h-96 md:max-h-[30rem] overflow-y-auto pr-1">
+              {loadingCajaSales ? (
+                <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-16 rounded-2xl bg-white/5 animate-pulse" />)}</div>
+              ) : cajaSales.length === 0 ? (
+                <p className="text-center text-zinc-500 text-sm mt-6">Sin movimientos registrados</p>
+              ) : (
+                <div className="space-y-3">
+                  {cajaSales.map(v => {
+                    const isCobro = v.tipo === "cobro_cuenta";
+                    return (
+                      <div
+                        key={v.id}
+                        onClick={() => {
+                          setSelectedVenta(v);
+                        }}
+                        className="rounded-2xl border border-white/10 bg-white/5 p-3 hover:bg-white/10 transition-colors cursor-pointer"
+                      >
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1 min-w-0 pr-2">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold uppercase ${
+                                isCobro 
+                                  ? "bg-emerald-500/20 text-emerald-300"
+                                  : v.tipo === "pedido"
+                                    ? "bg-purple-500/20 text-purple-300"
+                                    : "bg-blue-500/20 text-blue-300"
+                              }`}>
+                                {isCobro ? "Cobro" : v.tipo === "pedido" ? "Pedido" : "Venta"}
+                              </span>
+                              <span className="text-xs text-zinc-400">{v.hora} hs</span>
+                            </div>
+                            <p className="text-sm font-semibold text-white mt-1.5 truncate">{v.customer}</p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="text-sm font-bold text-white">${(isCobro ? v.pago : v.total).toLocaleString('es-AR')}</p>
+                            {!isCobro && v.saldo > 0 && <p className="text-xs text-red-400">Debe ${v.saldo.toLocaleString('es-AR')}</p>}
+                            {!isCobro && v.saldo === 0 && <p className="text-xs text-emerald-400">Pagado</p>}
+                          </div>
+                        </div>
+                        <div className="mt-2 flex items-center gap-2 flex-wrap">
+                          <span className="text-[10px] bg-white/5 border border-white/10 rounded-lg px-2 py-0.5 text-zinc-400 uppercase">{v.forma_pago || 'Efectivo'}</span>
+                          {v.pago > 0 && <span className="text-[10px] bg-white/5 border border-white/10 rounded-lg px-2 py-0.5 text-zinc-400">Pagó ${v.pago.toLocaleString('es-AR')}</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Sale Detail Modal */}
       {selectedVenta && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setSelectedVenta(null)}>
+        <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={(e) => { e.stopPropagation(); setSelectedVenta(null); }}>
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
           <div className="relative w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border border-white/10 bg-zinc-950 p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
             <div className="flex items-start justify-between mb-4">
@@ -3770,105 +4944,6 @@ export default function BakeryDriverApp() {
               >
                 <Download className="w-4 h-4" /> Descargar Comprobante
               </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Caja Detail Modal */}
-      {selectedCaja && (
-        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4" onClick={() => setSelectedCaja(null)}>
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-          <div className="relative w-full max-w-md rounded-t-3xl md:rounded-3xl border-t md:border border-white/10 bg-zinc-950 p-6 pb-10 md:pb-6 shadow-2xl overflow-y-auto transition-all duration-300" style={{ maxHeight: "85vh" }} onClick={e => e.stopPropagation()}>
-            <div className="mx-auto mb-5 h-1 w-12 rounded-full bg-white/20 md:hidden" />
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <h2 className="text-xl font-bold text-white">📦 Caja: {selectedCaja.user_name}</h2>
-                <p className="text-xs text-zinc-400 mt-0.5">Resumen de caja y listado de movimientos</p>
-              </div>
-              <button onClick={() => setSelectedCaja(null)} className="p-2 rounded-full bg-white/5 border border-white/10">
-                <X className="h-5 w-5 text-zinc-400" />
-              </button>
-            </div>
-
-            {/* Summary Cards */}
-            <div className="grid grid-cols-3 gap-2 mb-6">
-              <div 
-                onClick={() => setCajaFormaPago(cajaFormaPago === 'efectivo' ? '' : 'efectivo')}
-                className={`border rounded-xl p-3 text-center cursor-pointer transition-all ${cajaFormaPago === 'efectivo' ? 'bg-emerald-500/20 border-emerald-400 ring-1 ring-emerald-400' : 'bg-emerald-500/10 border-emerald-500/20 hover:bg-emerald-500/20'}`}>
-                <span className="text-[10px] text-emerald-400/80 uppercase block font-semibold mb-1">Efectivo</span>
-                <span className="text-sm font-bold text-emerald-400">${selectedCaja.total_efectivo.toLocaleString('es-AR')}</span>
-              </div>
-              <div 
-                onClick={() => setCajaFormaPago(cajaFormaPago === 'transferencia' ? '' : 'transferencia')}
-                className={`border rounded-xl p-3 text-center cursor-pointer transition-all ${cajaFormaPago === 'transferencia' ? 'bg-blue-500/20 border-blue-400 ring-1 ring-blue-400' : 'bg-blue-500/10 border-blue-500/20 hover:bg-blue-500/20'}`}>
-                <span className="text-[10px] text-blue-400/80 uppercase block font-semibold mb-1">Transf.</span>
-                <span className="text-sm font-bold text-blue-400">${selectedCaja.total_transferencia.toLocaleString('es-AR')}</span>
-              </div>
-              <div 
-                onClick={() => setCajaFormaPago(cajaFormaPago === 'saldo' ? '' : 'saldo')}
-                className={`border rounded-xl p-3 text-center cursor-pointer transition-all ${cajaFormaPago === 'saldo' ? 'bg-red-500/20 border-red-400 ring-1 ring-red-400' : 'bg-red-500/10 border-red-500/20 hover:bg-red-500/20'}`}>
-                <span className="text-[10px] text-red-400/80 uppercase block font-semibold mb-1">Fiado</span>
-                <span className="text-sm font-bold text-red-400">${selectedCaja.total_saldo.toLocaleString('es-AR')}</span>
-              </div>
-            </div>
-            <div className="mb-6 bg-white/5 border border-white/10 rounded-xl p-3 flex justify-between items-center text-sm">
-              <span className="text-zinc-400 uppercase tracking-widest text-[10px] font-bold">🛒 Total Vendido (Facturado)</span>
-              <span className="font-bold text-zinc-300">${selectedCaja.total_facturado.toLocaleString('es-AR')}</span>
-            </div>
-
-            {/* Sales List Title */}
-            <h3 className="text-xs text-zinc-500 uppercase tracking-widest mb-3">Últimos movimientos</h3>
-
-            {/* Sales List Container */}
-            <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
-              {loadingCajaSales ? (
-                <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-16 rounded-2xl bg-white/5 animate-pulse" />)}</div>
-              ) : cajaSales.length === 0 ? (
-                <p className="text-center text-zinc-500 text-sm mt-6">Sin movimientos registrados</p>
-              ) : (
-                <div className="space-y-3">
-                  {cajaSales.map(v => {
-                    const isCobro = v.tipo === "cobro_cuenta";
-                    return (
-                      <div
-                        key={v.id}
-                        onClick={() => {
-                          setSelectedVenta(v);
-                        }}
-                        className="rounded-2xl border border-white/10 bg-white/5 p-3 hover:bg-white/10 transition-colors cursor-pointer"
-                      >
-                        <div className="flex justify-between items-start">
-                          <div className="flex-1 min-w-0 pr-2">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold uppercase ${
-                                isCobro 
-                                  ? "bg-emerald-500/20 text-emerald-300"
-                                  : v.tipo === "pedido"
-                                    ? "bg-purple-500/20 text-purple-300"
-                                    : "bg-blue-500/20 text-blue-300"
-                              }`}>
-                                {isCobro ? "Cobro" : v.tipo === "pedido" ? "Pedido" : "Venta"}
-                              </span>
-                              <span className="text-xs text-zinc-400">{v.hora} hs</span>
-                            </div>
-                            <p className="text-sm font-semibold text-white mt-1.5 truncate">{v.customer}</p>
-                          </div>
-                          <div className="text-right shrink-0">
-                            <p className="text-sm font-bold text-white">${(isCobro ? v.pago : v.total).toLocaleString('es-AR')}</p>
-                            {!isCobro && v.saldo > 0 && <p className="text-xs text-red-400">Debe ${v.saldo.toLocaleString('es-AR')}</p>}
-                            {!isCobro && v.saldo === 0 && <p className="text-xs text-emerald-400">Pagado</p>}
-                          </div>
-                        </div>
-                        <div className="mt-2 flex items-center gap-2 flex-wrap">
-                          <span className="text-[10px] bg-white/5 border border-white/10 rounded-lg px-2 py-0.5 text-zinc-400 uppercase">{v.forma_pago || 'Efectivo'}</span>
-                          {v.pago > 0 && <span className="text-[10px] bg-white/5 border border-white/10 rounded-lg px-2 py-0.5 text-zinc-400">Pagó ${v.pago.toLocaleString('es-AR')}</span>}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
             </div>
           </div>
         </div>
