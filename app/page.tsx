@@ -6,13 +6,16 @@ import {
   CircleDollarSign, ClipboardList, ChevronRight, LogOut,
   User as UserIcon, X, Check, Calendar, CheckCircle2,
   CreditCard, Banknote, Clock, Receipt, ArrowLeft,
-  ChevronDown, AlertCircle, RefreshCw, Trash2, PieChart as PieChartIcon, BarChart3, Edit2, Download, Warehouse
+  ChevronDown, AlertCircle, RefreshCw, Trash2, PieChart as PieChartIcon, BarChart3, Edit2, Download, Warehouse, Archive
 } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 
 import { DndContext, closestCenter, KeyboardSensor, TouchSensor, MouseSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, rectSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+
+import DespachoRepartidor from "./components/DespachoRepartidor";
+import UsuariosCrud from "./components/UsuariosCrud";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://role.test/api";
 
@@ -72,7 +75,7 @@ const parsePaymentInput = (formatted: string): number => {
   return Number(clean) || 0;
 };
 
-interface Product  { id: number; name: string; price: number; quantity: number; sold_qty?: number; reserved_qty?: number; stock_local?: number; stock_vehiculo1?: number; stock_vehiculo2?: number; descripcion?: string; codigo?: string; estado?: string; idcategoria?: number; precio_unitario?: number; precio_reparto?: number; precio_bar?: number; disponible_reparto?: number; precios_especiales?: any[]; unidad_medida?: string; }
+interface Product  { id: number; name: string; price: number; quantity: number; sold_qty?: number; reserved_qty?: number; stock_local?: number; stock_repartidores?: { [id: string]: { cantidad: number, cantidad_reservada: number } }; descripcion?: string; codigo?: string; estado?: string; idcategoria?: number; precio_unitario?: number; precio_reparto?: number; precio_bar?: number; disponible_reparto?: number; precios_especiales?: any[]; unidad_medida?: string; }
 interface Client   { id: number; name: string; address: string; balance: number; }
 interface Delivery { id: number; customer: string; status: string; items: string; raw_items?: {id?: number, name: string, qty: number}[]; total: string; total_raw: number; address: string; advance?: number; fecha_entrega?: string | null; }
 interface SaleItem { id: number; name: string; price: number; quantity: number; }
@@ -410,12 +413,12 @@ function CategoriasModal({
 // ─── CheckoutModal ────────────────────────────────────────────────────────────
 function CheckoutModal({
   open, onClose, cart, products, token, onSuccess, clients,
-  pedidoId, pedidoItems, pedidoCliente, isEditing,
+  pedidoId, pedidoItems, pedidoCliente, isEditing, isVendedor,
 }: {
   open: boolean; onClose: () => void; cart: Record<number, number>;
   products: Product[]; token: string; onSuccess: () => void; clients: Client[];
   pedidoId?: number | null; pedidoItems?: SaleItem[]; pedidoCliente?: { id: number; name: string } | null;
-  isEditing?: boolean;
+  isEditing?: boolean; isVendedor?: boolean;
 }) {
   const [step, setStep] = useState(0);
   const [clientSearch, setClientSearch] = useState("");
@@ -550,7 +553,7 @@ function CheckoutModal({
             cart: activeItems.map(i => ({ id: i.id, quantity: i.quantity, price: i.price })),
             total: totalFinal,
             idcliente: selectedClient?.id ?? null,
-            tipo_venta: "venta_reparto",
+            tipo_venta: isVendedor || !selectedClient ? "venta_rapida" : "venta_reparto",
             descuento, recargo, pago: pagoNum,
             forma_de_pago: formaDePago,
             es_pedido: esPedido,
@@ -620,7 +623,7 @@ function CheckoutModal({
           <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mb-4">
             <Check className="w-8 h-8 text-emerald-500" />
           </div>
-          <h2 className="text-xl font-bold text-white mb-2">¡Venta Exitosa!</h2>
+          <h2 className="text-xl font-bold text-white mb-2"> ¡Venta Exitosa!</h2>
           <p className="text-sm text-zinc-400 mb-6">El pedido de reparto fue registrado correctamente.</p>
           <div className="flex flex-col gap-3 w-full">
             <label className="flex items-center justify-center gap-2 cursor-pointer text-zinc-300">
@@ -690,7 +693,7 @@ function CheckoutModal({
                     <div className="flex flex-col">
                       <span className="text-zinc-300 font-medium">{item.quantity}x {item.name}</span>
                       {hasPromo && (
-                        <span className="text-[10px] text-emerald-400 font-semibold tracking-wide">¡Precio especial aplicado!</span>
+                        <span className="text-[10px] text-emerald-400 font-semibold tracking-wide"> ¡Precio especial aplicado!</span>
                       )}
                     </div>
                     <div className="flex items-center gap-1.5">
@@ -790,7 +793,7 @@ function CheckoutModal({
                     <div className="flex flex-col">
                       <span className="text-zinc-300 font-medium">{item.quantity}x {item.name}</span>
                       {hasPromo && (
-                        <span className="text-[10px] text-emerald-400 font-semibold tracking-wide">¡Precio especial aplicado!</span>
+                        <span className="text-[10px] text-emerald-400 font-semibold tracking-wide"> ¡Precio especial aplicado!</span>
                       )}
                     </div>
                     <div className="flex items-center gap-1.5">
@@ -838,7 +841,7 @@ function CheckoutModal({
                 {[0, 5, 10, 15].map(v => (
                   <button key={v} onClick={() => setDescuento(v)}
                     className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-all ${descuento === v ? "bg-green-500 text-white" : "bg-white/5 border border-white/10 text-zinc-300"}`}>
-                    {v === 0 ? "—" : `${v}%`}
+                    {v === 0 ? "-" : `${v}%`}
                   </button>
                 ))}
               </div>
@@ -861,7 +864,7 @@ function CheckoutModal({
               {recargo > 0 && <p className="text-xs text-brand-yellow mt-1">+${((recargo / 100) * subtotal).toFixed(2)}</p>}
             </div>
 
-            {/* 🔄 Cambio de Mercadería */}
+            {/* Ã°Å¸ € €ž Cambio de Mercadería */}
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -923,7 +926,7 @@ function CheckoutModal({
           </div>
         )}
 
-        {/* ── ÚLTIMO PASO: PAGO ── */}
+        {/* ── ULTIMO PASO: PAGO ── */}
         {((step === 2 && !isPedidoMode) || (step === 1 && isPedidoMode)) && (
           <div className="space-y-5">
             {!esPedido && (
@@ -1055,7 +1058,7 @@ function ClienteDetalleModal({ client, token, onClose, onCargarPago }: { client:
             </button>
           )}
         </div>
-        <h3 className="text-xs text-zinc-500 uppercase tracking-widest mb-3">Últimas ventas</h3>
+        <h3 className="text-xs text-zinc-500 uppercase tracking-widest mb-3">Ãšltimas ventas</h3>
         {loading ? (
           <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-16 rounded-2xl bg-white/5 animate-pulse" />)}</div>
         ) : ventas.length === 0 ? (
@@ -1379,7 +1382,7 @@ function ProductEditModal({ open, product, categorias, clients, token, onClose, 
   const [formData, setFormData] = useState({
     nombre: '', idcategoria: '', codigo: '', descripcion: '',
     precio_unitario: 0, precio_reparto: 0, precio_bar: 0,
-    stock_local: 0, stock_vehiculo1: 0, stock_vehiculo2: 0,
+    stock_local: 0,
     estado: 'activo', disponible_reparto: 1, unidad_medida: 'unidades'
   });
   const [promos, setPromos] = useState<any[]>([]);
@@ -1396,8 +1399,6 @@ function ProductEditModal({ open, product, categorias, clients, token, onClose, 
         precio_reparto: product.precio_reparto || 0,
         precio_bar: product.precio_bar || 0,
         stock_local: product.stock_local || 0,
-        stock_vehiculo1: product.stock_vehiculo1 || 0,
-        stock_vehiculo2: product.stock_vehiculo2 || 0,
         estado: product.estado || 'activo',
         disponible_reparto: product.disponible_reparto ? 1 : 0,
         unidad_medida: product.unidad_medida || 'unidades',
@@ -1533,18 +1534,10 @@ function ProductEditModal({ open, product, categorias, clients, token, onClose, 
 
           {tab === "inventario" && (
             <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 gap-4">
                 <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
                   <label className="block text-xs font-semibold text-brand-yellow mb-2 uppercase tracking-wider text-center">Stock Local (Panadería)</label>
                   <input type="number" value={formData.stock_local} onChange={e => setFormData({...formData, stock_local: Number(e.target.value)})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-lg font-bold text-center text-zinc-300 focus:border-brand-yellow outline-none" />
-                </div>
-                <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
-                  <label className="block text-xs font-semibold text-emerald-400 mb-2 uppercase tracking-wider text-center">Vehículo 1</label>
-                  <input type="number" value={formData.stock_vehiculo1} onChange={e => setFormData({...formData, stock_vehiculo1: Number(e.target.value)})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-lg font-bold text-center text-zinc-300 focus:border-emerald-400 outline-none" />
-                </div>
-                <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
-                  <label className="block text-xs font-semibold text-blue-400 mb-2 uppercase tracking-wider text-center">Vehículo 2</label>
-                  <input type="number" value={formData.stock_vehiculo2} onChange={e => setFormData({...formData, stock_vehiculo2: Number(e.target.value)})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-lg font-bold text-center text-zinc-300 focus:border-blue-400 outline-none" />
                 </div>
               </div>
               <div className="bg-white/5 border border-white/10 rounded-xl p-3 text-center">
@@ -1649,7 +1642,7 @@ function ProductEditModal({ open, product, categorias, clients, token, onClose, 
                       <div key={p.id} className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/10">
                         <div>
                           <p className="font-semibold text-sm text-white">{p.cliente_nombre}</p>
-                          <p className="text-xs text-brand-yellow font-medium">${p.precio} <span className="text-zinc-500 ml-1">{p.fecha_desde ? `(${p.fecha_desde} - ${p.fecha_hasta||'∞'})` : 'Permanente'}</span></p>
+                          <p className="text-xs text-brand-yellow font-medium">${p.precio} <span className="text-zinc-500 ml-1">{p.fecha_desde ? `(${p.fecha_desde} - ${p.fecha_hasta||'Ã¢Ë†Å¾'})` : 'Permanente'}</span></p>
                         </div>
                         <button onClick={() => handleDeletePromo(p.id)} className="p-2 bg-red-500/10 text-red-400 hover:bg-red-500 hover:text-white rounded-lg active:scale-95 transition-all">
                           <Trash2 className="w-4 h-4" />
@@ -1680,9 +1673,77 @@ function ProductEditModal({ open, product, categorias, clients, token, onClose, 
 }
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
+const InlineStockEdit = ({
+  id,
+  initialStock,
+  onSave
+}: {
+  id: number;
+  initialStock: number;
+  onSave: (id: number, newStock: number) => Promise<void>;
+}) => {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(String(initialStock));
+  const [loading, setLoading] = useState(false);
+
+  React.useEffect(() => {
+    setVal(String(initialStock));
+  }, [initialStock]);
+
+  const handleSave = async () => {
+    const num = Number(val);
+    if (isNaN(num) || num < 0) {
+      setVal(String(initialStock));
+      setEditing(false);
+      return;
+    }
+    if (num !== initialStock) {
+      setLoading(true);
+      await onSave(id, num);
+      setLoading(false);
+    }
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <div className="flex justify-center items-center gap-1">
+        <input
+          type="number"
+          autoFocus
+          value={val}
+          onChange={e => setVal(e.target.value)}
+          onBlur={handleSave}
+          onKeyDown={e => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') { setVal(String(initialStock)); setEditing(false); } }}
+          className="w-16 h-8 text-center rounded-lg bg-black/40 border border-brand-red text-white outline-none focus:ring-1 focus:ring-brand-red font-bold text-lg"
+          disabled={loading}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      onClick={() => setEditing(true)}
+      className="cursor-pointer hover:bg-white/10 rounded-lg px-2 py-0.5 transition-colors group inline-flex items-center gap-1 mx-auto"
+      title="Click para editar stock"
+    >
+      <span className="font-bold text-white text-lg">{initialStock}</span>
+      <Edit2 className="w-3 h-3 text-zinc-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+    </div>
+  );
+};
+
 export default function BakeryDriverApp() {
   const [token, setToken]   = useState<string | null>(null);
   const [user, setUser]     = useState<any>(null);
+
+  const isAdmin = user?.roles?.some((r: string) => r.toLowerCase() === 'admin');
+  const isProduccion = user?.roles?.some((r: string) => r.toLowerCase() === 'produccion');
+  const isVendedor = user?.roles?.some((r: string) => r.toLowerCase() === 'vendedor');
+  const isVehiculo1 = user?.roles?.some((r: string) => r.toLowerCase() === 'vehiculo1');
+  const isVehiculo2 = user?.roles?.some((r: string) => r.toLowerCase() === 'vehiculo2');
+
   const [activeTab, setActiveTab]           = useState("pos");
   const [deliveryFilter, setDeliveryFilter] = useState("All");
   const [search, setSearch]                 = useState("");
@@ -1693,6 +1754,12 @@ export default function BakeryDriverApp() {
   const [misVentas, setMisVentas] = useState<any[]>([]);
   const [loading, setLoading]     = useState(true);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
+
+  React.useEffect(() => {
+    if (user && isProduccion && activeTab === 'pos') {
+      setActiveTab('deposito');
+    }
+  }, [user, isProduccion, activeTab]);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [categoriasModalOpen, setCategoriasModalOpen] = useState(false);
 
@@ -1775,9 +1842,12 @@ export default function BakeryDriverApp() {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
-  const [historyTab, setHistoryTab] = useState<'movimientos' | 'estadisticas'>('movimientos');
+  const [historyTab, setHistoryTab] = useState<'movimientos' | 'estadisticas' | 'cierres'>('movimientos');
   const [productStats, setProductStats] = useState<any[]>([]);
   const [clientStats, setClientStats] = useState<{ top_clientes: any[], cambios: any[] } | null>(null);
+  const [cierresList, setCierresList] = useState<any[]>([]);
+  const [loadingCierres, setLoadingCierres] = useState(false);
+  const [selectedCierreDetail, setSelectedCierreDetail] = useState<any | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [historyRefresh, setHistoryRefresh] = useState(0);
   const [totalsModalOpen, setTotalsModalOpen] = useState(false);
@@ -1794,6 +1864,14 @@ export default function BakeryDriverApp() {
   const [historyActiveFilter, setHistoryActiveFilter] = useState<{ type: 'caja' | 'payment', value: any } | null>(null);
   const [selectedVenta, setSelectedVenta] = useState<any | null>(null);
   const [selectedCaja, setSelectedCaja] = useState<any | null>(null); // caja detail modal
+
+  // ── Estados de Turno (Cierre de Caja) ──
+  const [cajaTurnoActivo, setCajaTurnoActivo] = useState<any | null>(null);
+  const [cajaTurnoModal, setCajaTurnoModal] = useState<'abrir' | 'cerrar' | null>(null);
+  const [cajaMontoApertura, setCajaMontoApertura] = useState<number | string>("");
+  const [cajaFechaApertura, setCajaFechaApertura] = useState<string>("");
+  const [cajaEfectivoReal, setCajaEfectivoReal] = useState<number | string>("");
+  const [cajaObservaciones, setCajaObservaciones] = useState<string>("");
   const [cajaSales, setCajaSales] = useState<any[]>([]);
   const [loadingCajaSales, setLoadingCajaSales] = useState(false);
   const [imprimirDoble, setImprimirDoble] = useState(false);
@@ -1806,6 +1884,7 @@ export default function BakeryDriverApp() {
 
   // ── Depósito state ──────────────────────────────────────────────────────────
   const [depositoArticulos, setDepositoArticulos] = useState<any[]>([]);
+  const [repartidores, setRepartidores] = useState<{id: number, name: string}[]>([]);
   const [depositoMP, setDepositoMP] = useState<any[]>([]);
   const [depositoReservasPendientes, setDepositoReservasPendientes] = useState<any[]>([]);
   const [depositoMovimientos, setDepositoMovimientos] = useState<any[]>([]);
@@ -1836,13 +1915,53 @@ export default function BakeryDriverApp() {
   const [recetas, setRecetas] = useState<any[]>([]);
   const [loadingRecetas, setLoadingRecetas] = useState(false);
   const [recetaSearch, setRecetaSearch] = useState("");
+  const [recetaPage, setRecetaPage] = useState(1);
+  const [recetaArticuloSearch, setRecetaArticuloSearch] = useState('');
+  const [recetaArticuloDropdownOpen, setRecetaArticuloDropdownOpen] = useState(false);
   const [recetaModal, setRecetaModal] = useState<null | 'crear' | 'editar'>(null);
   const [recetaEditing, setRecetaEditing] = useState<any>(null);
-  const [recetaForm, setRecetaForm] = useState<{ nombre: string; descripcion: string; porciones: number | string; id_articulo_resultado: any }>({ nombre: '', descripcion: '', porciones: 1, id_articulo_resultado: '' });
+  const [recetaForm, setRecetaForm] = useState<any>({ 
+    nombre: '', descripcion: '', porciones: 1, id_articulo_resultado: '',
+    empleado: 0, costo_elaboracion: 0, costo_unitario: 0, porcentaje_ganancia: 0, precio_unitario: 0, iva: 0, precio_iva: 0, ganancia: 0
+  });
   const [recetaIngredientes, setRecetaIngredientes] = useState<any[]>([]);
   const [recetaIngSearch, setRecetaIngSearch] = useState('');
   const [recetaEjecutarModal, setRecetaEjecutarModal] = useState<any>(null);
   const [recetaEjecutarQty, setRecetaEjecutarQty] = useState(1);
+
+  // Math for Receta
+  const recetaTotalPages = Math.ceil(recetas.length / 6) || 1;
+  const subtotalIngredientes = useMemo(() => {
+    return recetaIngredientes.reduce((sum, i) => {
+      const p = parseFloat(i.precio) || 0;
+      const w = parseFloat(i.peso) || 1;
+      const qty = parseFloat(i.cantidad) || 0;
+      return sum + (qty * p / Math.max(1, w));
+    }, 0);
+  }, [recetaIngredientes]);
+
+  React.useEffect(() => {
+    if (recetaModal) {
+      const emp = parseFloat(String(recetaForm.empleado).replace(',', '.')) || 0;
+      const costo_elaboracion = subtotalIngredientes + emp;
+      const porc = parseFloat(String(recetaForm.porciones).replace(',', '.')) || 1;
+      const costo_unitario = costo_elaboracion / Math.max(0.01, porc);
+      const porc_ganancia = parseFloat(String(recetaForm.porcentaje_ganancia).replace(',', '.')) || 0;
+      const ganancia = costo_unitario * (porc_ganancia / 100);
+      const precio_unitario = costo_unitario + ganancia;
+      const iva = parseFloat(String(recetaForm.iva).replace(',', '.')) || 0;
+      const precio_iva = precio_unitario * (1 + (iva / 100));
+
+      setRecetaForm((prev: any) => ({
+        ...prev,
+        costo_elaboracion: costo_elaboracion.toFixed(2),
+        costo_unitario: costo_unitario.toFixed(2),
+        ganancia: ganancia.toFixed(2),
+        precio_unitario: precio_unitario.toFixed(2),
+        precio_iva: precio_iva.toFixed(2)
+      }));
+    }
+  }, [subtotalIngredientes, recetaForm.empleado, recetaForm.porciones, recetaForm.porcentaje_ganancia, recetaForm.iva, recetaModal]);
 
   const filteredDepositoArticulos = useMemo(() => {
     let list = depositoArticulos;
@@ -1915,6 +2034,7 @@ export default function BakeryDriverApp() {
 
   useEffect(() => {
     if (!token || !user) return;
+    
     const fetchHistory = async () => {
       setLoadingHistory(true);
       try {
@@ -1960,6 +2080,112 @@ export default function BakeryDriverApp() {
     }, 400);
     return () => clearTimeout(delayDebounceFn);
   }, [token, user, historyFilterType, historyDate, historyStartDate, historyEndDate, historyMonthYear, historyRefresh, historyPage, historySearch, historyType, historyFormaPago]);
+
+  const fetchCajaTurno = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/admin/caja-activa`, { 
+        headers: { 'Accept': 'application/json', Authorization: `Bearer ${token}` } 
+      });
+      if (res.ok) {
+        const d = await res.json();
+        setCajaTurnoActivo(d.caja || null);
+      }
+    } catch (e) {
+      console.error("Error al obtener caja activa", e);
+    }
+  };
+
+  const fetchCierres = async () => {
+    if (!token) return;
+    setLoadingCierres(true);
+    try {
+      const res = await fetch(`${API_URL}/admin/cierre-cajas`, {
+        headers: { 'Accept': 'application/json', Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const d = await res.json();
+        setCierresList(d.data || []);
+      }
+    } catch (e) {
+      console.error("Error al obtener cierres de caja", e);
+    } finally {
+      setLoadingCierres(false);
+    }
+  };
+
+  useEffect(() => {
+    if (token) {
+      fetchCajaTurno();
+      if (historyTab === 'cierres') {
+        fetchCierres();
+      }
+    }
+  }, [token, activeTab, historyTab, historyRefresh]);
+
+  const handleAbrirCaja = async () => {
+    try {
+      const res = await fetch(`${API_URL}/admin/abrir-caja`, {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json", 
+          "Accept": "application/json",
+          Authorization: `Bearer ${token}` 
+        },
+        body: JSON.stringify({ 
+          monto_apertura: cajaMontoApertura || 0,
+          fecha_apertura: cajaFechaApertura 
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setCajaTurnoActivo(data.caja);
+        setCajaTurnoModal(null);
+        setHistoryRefresh(p => p + 1);
+        fetchCajaTurno();
+      } else {
+        alert(data.message || "Error al abrir la caja");
+        if (data.message === 'Ya hay una caja abierta.') {
+          setCajaTurnoModal(null);
+          fetchCajaTurno();
+        }
+      }
+    } catch (e: any) {
+      console.error("Error al abrir caja:", e);
+      alert("Error al abrir caja: " + (e?.message || ""));
+    }
+  };
+
+  const handleCerrarCaja = async () => {
+    if (!cajaTurnoActivo) return;
+    try {
+      const res = await fetch(`${API_URL}/admin/cerrar-caja/${cajaTurnoActivo.id}`, {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json", 
+          "Accept": "application/json",
+          Authorization: `Bearer ${token}` 
+        },
+        body: JSON.stringify({ 
+          efectivo_real: cajaEfectivoReal || 0,
+          observaciones: cajaObservaciones
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert(`Caja cerrada. Diferencia: $${data.caja.diferencia}`);
+        setCajaTurnoActivo(null);
+        setCajaTurnoModal(null);
+        setHistoryRefresh(p => p + 1);
+        fetchCajaTurno();
+      } else {
+        alert(data.message || "Error al cerrar la caja");
+      }
+    } catch (e: any) {
+      console.error("Error al cerrar caja:", e);
+      alert("Error al cerrar caja: " + (e?.message || ""));
+    }
+  };
   const [cajaFormaPago, setCajaFormaPago] = useState<string>("");
 
   useEffect(() => {
@@ -2066,17 +2292,21 @@ export default function BakeryDriverApp() {
 
   const displayedProducts = useMemo(() => {
     if (posSearch) {
-      // When searching, filter but keep the user-defined order from products array
       return products.filter(p => p.name.toLowerCase().includes(posSearch.toLowerCase()));
     }
-    // No search: show all products in their saved order (products array already sorted by backend 'orden')
-    // Only sort by stock within that: in-stock first, but within each group keep user order
-    return [...products].sort((a, b) => {
+    
+    let baseList = [...products];
+    if (isAdmin || isVendedor) {
+      return baseList.filter(p => p.quantity > 0).sort((a, b) => (b.sold_qty || 0) - (a.sold_qty || 0)).slice(0, 10);
+    }
+    
+    // Sort in-stock first, keep order stable
+    return baseList.sort((a, b) => {
       const aHasStock = a.quantity > 0 ? 1 : 0;
       const bHasStock = b.quantity > 0 ? 1 : 0;
-      return bHasStock - aHasStock; // in-stock first, ties keep original order (stable sort)
+      return bHasStock - aHasStock;
     });
-  }, [products, posSearch]);
+  }, [products, posSearch, isAdmin, isVendedor]);
 
   // Checkout state
   const [checkoutOpen, setCheckoutOpen] = useState(false);
@@ -2247,6 +2477,48 @@ export default function BakeryDriverApp() {
     finally { if (full) setLoading(false); }
   }, [user]);
 
+  const handleInlineAjusteMP = async (id: number, newStock: number) => {
+    try {
+      const res = await fetch(`${API_URL}/deposito/mp/${id}/ajustar`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ cantidad: newStock })
+      });
+      if (res.ok) {
+        await fetchDeposito();
+      } else {
+        const data = await res.json();
+        alert(data.message || 'Error al ajustar stock de materia prima');
+      }
+    } catch (e) {
+      alert('Error de conexión al ajustar stock');
+    }
+  };
+
+  const handleInlineAjuste = async (id: number, newStock: number) => {
+    try {
+      const res = await fetch(`${API_URL}/deposito/articulos/${id}/ajustar`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ cantidad: newStock })
+      });
+      if (res.ok) {
+        await fetchDeposito(); // Recargar todo el depósito (artículos y MP)
+      } else {
+        const data = await res.json();
+        alert(data.message || 'Error al ajustar stock');
+      }
+    } catch (e) {
+      alert('Error de conexión al ajustar stock');
+    }
+  };
+
   const fetchDeposito = useCallback(async () => {
     if (!token) return;
     setLoadingDeposito(true);
@@ -2257,6 +2529,7 @@ export default function BakeryDriverApp() {
         setDepositoArticulos(data.articulos ?? []);
         setDepositoMP(data.materias_primas ?? []);
         setDepositoReservasPendientes(data.reservas_pendientes ?? []);
+        setRepartidores(data.repartidores ?? []);
       }
     } catch { console.error('Error fetching deposito'); }
     finally { setLoadingDeposito(false); }
@@ -2311,6 +2584,12 @@ export default function BakeryDriverApp() {
     } catch { }
     setLoadingRecetas(false);
   }, [token]);
+
+  useEffect(() => {
+    if (activeTab === 'deposito') {
+      fetchDeposito();
+    }
+  }, [activeTab, fetchDeposito]);
 
   useEffect(() => {
     if (activeTab === 'materias') {
@@ -2371,11 +2650,6 @@ export default function BakeryDriverApp() {
   const cartTotal = useMemo(() =>
     products.reduce((s, p) => s + p.price * (cart[p.id] || 0), 0).toFixed(2), [cart, products]);
   const cartCount = useMemo(() => Object.values(cart).reduce((s, q) => s + q, 0), [cart]);
-
-  const isAdmin = user?.roles?.some((r: string) => r.toLowerCase() === 'admin');
-  const isVendedor = user?.roles?.some((r: string) => r.toLowerCase() === 'vendedor');
-  const isVehiculo1 = user?.roles?.some((r: string) => r.toLowerCase() === 'vehiculo1');
-  const isVehiculo2 = user?.roles?.some((r: string) => r.toLowerCase() === 'vehiculo2');
 
   const [loadingActionId, setLoadingActionId] = useState<number | null>(null);
 
@@ -2532,19 +2806,24 @@ export default function BakeryDriverApp() {
             </div>
           </div>
           <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
-            <button onClick={() => setActiveTab('pedidos')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'pedidos' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
-              <Truck className="w-5 h-5"/> <span className="font-semibold text-sm">Pedidos</span>
-              {deliveries.filter(d => d.status === "Late").length > 0 && <span className="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">{deliveries.filter(d => d.status === "Late").length}</span>}
-            </button>
-            {!isVendedor && (
-              <button onClick={() => setActiveTab('stock')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'stock' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Package className="w-5 h-5"/> <span className="font-semibold text-sm">Stock</span></button>
+            {!isProduccion && (
+              <>
+                <button onClick={() => setActiveTab('pedidos')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'pedidos' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
+                  <Truck className="w-5 h-5"/> <span className="font-semibold text-sm">Pedidos</span>
+                  {deliveries.filter(d => d.status === "Late").length > 0 && <span className="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">{deliveries.filter(d => d.status === "Late").length}</span>}
+                </button>
+                {!isVendedor && (
+                  <button onClick={() => setActiveTab('stock')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'stock' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Package className="w-5 h-5"/> <span className="font-semibold text-sm">Stock</span></button>
+                )}
+                <button onClick={() => setActiveTab('pos')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'pos' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><ShoppingCart className="w-5 h-5"/> <span className="font-semibold text-sm">Venta Rápida</span></button>
+                {!isVendedor && (
+                  <button onClick={() => setActiveTab('clientes')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'clientes' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Users className="w-5 h-5"/> <span className="font-semibold text-sm">Clientes</span></button>
+                )}
+                <button onClick={() => setActiveTab('ventas')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'ventas' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Receipt className="w-5 h-5"/> <span className="font-semibold text-sm">Historial</span></button>
+              </>
             )}
-            <button onClick={() => setActiveTab('pos')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'pos' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><ShoppingCart className="w-5 h-5"/> <span className="font-semibold text-sm">Venta Rápida</span></button>
-            {!isVendedor && (
-              <button onClick={() => setActiveTab('clientes')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'clientes' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Users className="w-5 h-5"/> <span className="font-semibold text-sm">Clientes</span></button>
-            )}
-            <button onClick={() => setActiveTab('ventas')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'ventas' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Receipt className="w-5 h-5"/> <span className="font-semibold text-sm">Historial</span></button>
-            {isAdmin && (
+            
+            {(isAdmin || isProduccion) && (
               <button onClick={() => { setActiveTab('deposito'); fetchDeposito(); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'deposito' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
                 <Warehouse className="w-5 h-5"/> <span className="font-semibold text-sm">Depósito</span>
                 {depositoReservasPendientes.length > 0 && <span className="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">{depositoReservasPendientes.length}</span>}
@@ -2555,9 +2834,19 @@ export default function BakeryDriverApp() {
                 <ClipboardList className="w-5 h-5"/> <span className="font-semibold text-sm">Materias Primas</span>
               </button>
             )}
-            {isAdmin && (
+            {(isAdmin || isProduccion) && (
               <button onClick={() => { setActiveTab('recetas'); fetchRecetas(recetaSearch); fetchMateriaPrimas(1, ''); fetchDeposito(); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'recetas' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
                 <CheckCircle2 className="w-5 h-5"/> <span className="font-semibold text-sm">Recetas</span>
+              </button>
+            )}
+            {isAdmin && (
+              <button onClick={() => { setActiveTab('despacho'); fetchDeposito(); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'despacho' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
+                <Truck className="w-5 h-5"/> <span className="font-semibold text-sm">Despacho</span>
+              </button>
+            )}
+            {isAdmin && (
+              <button onClick={() => setActiveTab('usuarios')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'usuarios' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
+                <UserIcon className="w-5 h-5"/> <span className="font-semibold text-sm">Usuarios</span>
               </button>
             )}
           </nav>
@@ -2858,10 +3147,8 @@ export default function BakeryDriverApp() {
                     
                     return entries.map(([name, { qty, id }]) => {
                       const prod = products.find(p => p.id === id) || adminStock.find(p => p.id === id);
-                      const stockV1 = Number(prod?.stock_vehiculo1 || 0);
-                      const stockV2 = Number(prod?.stock_vehiculo2 || 0);
-                      const totalVehiculos = stockV1 + stockV2;
-                      const faltan = qty > totalVehiculos ? qty - totalVehiculos : 0;
+                      const totalRepartidores = prod?.stock_repartidores ? Object.values(prod.stock_repartidores).reduce((acc: number, r: any) => acc + Number(r.cantidad), 0) : 0;
+                      const faltan = qty > totalRepartidores ? qty - totalRepartidores : 0;
 
                       return (
                         <div key={name} className="flex flex-col gap-2 p-3 rounded-xl bg-white/5 border border-white/10">
@@ -2871,8 +3158,8 @@ export default function BakeryDriverApp() {
                           </div>
                           <div className="flex items-center justify-between mt-1 pt-2 border-t border-white/5">
                             <div className="flex flex-col gap-0.5 text-[11px]">
-                              <span className="text-zinc-400">Stock V1: <b className="text-zinc-200">{stockV1}</b> | V2: <b className="text-zinc-200">{stockV2}</b></span>
-                              {faltan > 0 && <span className="text-red-400 font-semibold">⚠️ Faltan {faltan} uds en móviles</span>}
+                              <span className="text-zinc-400">En Repartidores: <b className="text-zinc-200">{totalRepartidores}</b></span>
+                              {faltan > 0 && <span className="text-red-400 font-semibold">Ã¢Å¡  Ã¯ ¸  Faltan {faltan} uds en móviles</span>}
                             </div>
                             
                             {faltan > 0 && prod && (
@@ -2930,7 +3217,7 @@ export default function BakeryDriverApp() {
                               <p className="text-xs text-zinc-400 font-medium mt-0.5">${item.price}</p>
                             </div>
                             <div className="hidden sm:flex items-center gap-1 shrink-0">
-                              {([{label:'LOC',val:item.stock_local},{label:'V1',val:item.stock_vehiculo1},{label:'V2',val:item.stock_vehiculo2}] as {label:string,val:number}[]).map(s => (
+                              {([{label:'LOC',val:item.stock_local},{label:'REP',val:item.stock_repartidores ? Object.values(item.stock_repartidores).reduce((acc: number, r: any) => acc + Number(r.cantidad), 0) : 0}] as {label:string,val:number}[]).map(s => (
                                 <div key={s.label} className="flex flex-col items-center justify-center bg-black/40 rounded-lg w-9 h-9">
                                   <span className="text-[9px] text-zinc-500 font-medium leading-none">{s.label}</span>
                                   <span className="text-xs font-bold text-white leading-none mt-0.5">{s.val}</span>
@@ -3016,12 +3303,11 @@ export default function BakeryDriverApp() {
                 <form onSubmit={async (e) => {
                   e.preventDefault();
                   const fd = new FormData(e.target as HTMLFormElement);
-                  const vehiculo_solicitante = isVehiculo1 ? '1' : isVehiculo2 ? '2' : isAdmin ? '1' : '';
                   try {
                     const res = await fetch(`${API_URL}/deposito/reservar`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', Authorization: `Bearer ${token}` },
-                      body: JSON.stringify({ item_id: reservaModalItem.id, cantidad: parseFloat(fd.get('cantidad') as string), vehiculo_solicitante })
+                      body: JSON.stringify({ item_id: reservaModalItem.id, cantidad: parseFloat(fd.get('cantidad') as string) })
                     });
                     if (res.ok) {
                       setReservaModalItem(null);
@@ -3072,7 +3358,7 @@ export default function BakeryDriverApp() {
                         <p className="font-semibold text-white">{mp.nombre}</p>
                         <div className="flex flex-wrap gap-3 text-xs text-zinc-400">
                           <span>Precio: <strong className="text-zinc-200">${mp.precio}</strong></span>
-                          <span>Peso: <strong className="text-zinc-200">{mp.peso} {mp.unidad_medida}</strong></span>
+                          <span>Presentación: <strong className="text-zinc-200">{mp.peso} unid. base</strong></span>
                           <span>En depósito: <strong className="text-emerald-300">{mp.stock_deposito} {mp.unidad_medida}</strong></span>
                         </div>
                       </div>
@@ -3139,7 +3425,7 @@ export default function BakeryDriverApp() {
                     </select>
                   </div>
                   <div className="bg-white/5 border border-white/10 rounded-xl p-3 text-[11px] text-zinc-400 leading-relaxed">
-                    💡 <strong>Cálculo de costo por unidad:</strong> Si comprás una bolsa de <strong>25 kg</strong> a <strong>$25.000</strong>, poné Costo: <code>25000</code> y Presentación: <code>25</code> (unidad: <code>kg</code>). Las recetas calcularán automáticamente <strong>${mpForm.peso > 0 ? (mpForm.precio / mpForm.peso).toFixed(2) : '0.00'} por {mpForm.unidad_medida || 'kg'}</strong>.
+                    💡 <strong>Tip para Recetas:</strong> Si vas a usar <strong>gramos</strong> en tus recetas, poné el total de gramos en la Presentación (ej: <code>25000</code> para una bolsa de 25kg). El costo estimado será de <strong>${mpForm.peso > 0 ? (mpForm.precio / mpForm.peso).toFixed(2) : '0.00'} por cada unidad base</strong>.
                   </div>
                   <button type="submit" className="w-full bg-brand-red text-white h-11 rounded-xl font-bold shadow-lg shadow-brand-red/20">{mpEditing ? 'Guardar Cambios' : 'Crear'}</button>
                 </form>
@@ -3148,31 +3434,38 @@ export default function BakeryDriverApp() {
           )}
 
           {/* ── RECETAS ── */}
-          {activeTab === "recetas" && isAdmin && (
+          {activeTab === "recetas" && (isAdmin || isProduccion) && (
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <h1 className="text-2xl font-bold">Recetas de Producción</h1>
-                <button onClick={() => { 
-                  if (depositoArticulos.length === 0) fetchDeposito();
-                  if (materiaPrimas.length === 0) fetchMateriaPrimas(1, '');
-                  setRecetaForm({ nombre: '', descripcion: '', porciones: 1, id_articulo_resultado: '' }); 
-                  setRecetaIngredientes([]); 
-                  setRecetaEditing(null); 
-                  setRecetaModal('crear'); 
-                }}
-                  className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-emerald-500/20 transition-colors shrink-0">
-                  <Plus className="w-4 h-4" /> Nueva Receta
-                </button>
+                                {isAdmin && (
+                  <button onClick={() => { 
+                    if (depositoArticulos.length === 0) fetchDeposito();
+                    if (materiaPrimas.length === 0) fetchMateriaPrimas(1, '');
+                    setRecetaForm({ 
+                      nombre: '', descripcion: '', porciones: 1, id_articulo_resultado: '',
+                      empleado: 0, costo_elaboracion: 0, costo_unitario: 0, porcentaje_ganancia: 0, precio_unitario: 0, iva: 0, precio_iva: 0, ganancia: 0
+                    }); 
+                    setRecetaIngredientes([]); 
+                    setRecetaEditing(null); 
+                    setRecetaArticuloSearch('');
+                    setRecetaArticuloDropdownOpen(false);
+                    setRecetaModal('crear'); 
+                  }}
+                    className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-emerald-500/20 transition-colors shrink-0">
+                    <Plus className="w-4 h-4" /> Nueva Receta
+                  </button>
+                )}
               </div>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
                 <input type="text" placeholder="Buscar recetas..." value={recetaSearch}
-                  onChange={e => { setRecetaSearch(e.target.value); fetchRecetas(e.target.value); }}
+                  onChange={e => { setRecetaSearch(e.target.value); setRecetaPage(1); fetchRecetas(e.target.value); }}
                   className="w-full h-10 pl-9 pr-4 rounded-xl bg-white/5 border border-white/10 text-sm text-white focus:border-brand-red outline-none" />
               </div>
               {loadingRecetas ? <p className="text-center text-zinc-500 py-8">Cargando...</p> : (
                 <div className="space-y-3">
-                  {recetas.map((r: any) => (
+                  {recetas.slice((recetaPage - 1) * 6, recetaPage * 6).map((r: any) => (
                     <div key={r.id} className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
                       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                         <div>
@@ -3188,12 +3481,25 @@ export default function BakeryDriverApp() {
                         <div className="flex gap-2 shrink-0 flex-wrap">
                           <button onClick={() => { setRecetaEjecutarModal(r); setRecetaEjecutarQty(1); }}
                             className="text-xs px-3 py-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-lg hover:bg-emerald-500/20 transition-colors font-semibold">
-                            ▶ Ejecutar
+                             –¶ Ejecutar
                           </button>
                           <button onClick={() => {
                             if (depositoArticulos.length === 0) fetchDeposito();
                             if (materiaPrimas.length === 0) fetchMateriaPrimas(1, '');
-                            setRecetaForm({ nombre: r.nombre, descripcion: r.descripcion ?? '', porciones: r.porciones, id_articulo_resultado: r.id_articulo_resultado ?? '' });
+                            setRecetaForm({ 
+                              nombre: r.nombre, 
+                              descripcion: r.descripcion ?? '', 
+                              porciones: r.porciones, 
+                              id_articulo_resultado: r.id_articulo_resultado ?? '',
+                              empleado: r.calculo?.empleado ?? 0,
+                              costo_elaboracion: r.calculo?.costo_elaboracion ?? 0,
+                              costo_unitario: r.calculo?.costo_unitario ?? 0,
+                              porcentaje_ganancia: r.calculo?.porcentaje_ganancia ?? 0,
+                              precio_unitario: r.calculo?.precio ?? 0,
+                              iva: r.calculo?.iva ?? 0,
+                              precio_iva: r.calculo?.precio_iva ?? 0,
+                              ganancia: r.calculo?.ganancia ?? 0
+                            });
                             setRecetaIngredientes(r.ingredientes?.map((i: any) => {
                               const mpInfo = allMateriasPrimas.find((mp: any) => String(mp.id) === String(i.id_materia_prima));
                               return { 
@@ -3205,7 +3511,10 @@ export default function BakeryDriverApp() {
                                 peso: i.peso || mpInfo?.peso || 1,
                               };
                             }) ?? []);
-                            setRecetaEditing(r); setRecetaModal('editar');
+                            setRecetaEditing(r);
+                            setRecetaArticuloSearch('');
+                            setRecetaArticuloDropdownOpen(false);
+                            setRecetaModal('editar');
                           }} className="text-xs px-3 py-1.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-lg hover:bg-blue-500/20 transition-colors">
                             <Edit2 className="w-3 h-3 inline mr-1" />Editar
                           </button>
@@ -3232,6 +3541,15 @@ export default function BakeryDriverApp() {
                     </div>
                   ))}
                   {recetas.length === 0 && <p className="text-center text-zinc-500 py-8">No hay recetas cargadas.</p>}
+                </div>
+              )}
+              {recetaTotalPages > 1 && (
+                <div className="flex items-center justify-center gap-4 py-3 border-t border-white/5 mt-4">
+                  <button type="button" onClick={() => setRecetaPage(p => Math.max(1, p - 1))} disabled={recetaPage === 1}
+                    className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm disabled:opacity-30 transition-colors">Anterior</button>
+                  <span className="text-xs text-zinc-500">Pág {recetaPage} de {recetaTotalPages}</span>
+                  <button type="button" onClick={() => setRecetaPage(p => Math.min(recetaTotalPages, p + 1))} disabled={recetaPage === recetaTotalPages}
+                    className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm disabled:opacity-30 transition-colors">Siguiente</button>
                 </div>
               )}
             </div>
@@ -3267,7 +3585,15 @@ export default function BakeryDriverApp() {
                         ...recetaForm, 
                         porciones: parseFloat(String(recetaForm.porciones).replace(',', '.')) || 1,
                         id_articulo_resultado: recetaForm.id_articulo_resultado || null, 
-                        ingredientes: parsedIngredientes 
+                        ingredientes: parsedIngredientes,
+                        empleado: parseFloat(String(recetaForm.empleado).replace(',', '.')) || 0,
+                        costo_elaboracion: parseFloat(String(recetaForm.costo_elaboracion).replace(',', '.')) || 0,
+                        costo_unitario: parseFloat(String(recetaForm.costo_unitario).replace(',', '.')) || 0,
+                        porcentaje_ganancia: parseFloat(String(recetaForm.porcentaje_ganancia).replace(',', '.')) || 0,
+                        precio_unitario: parseFloat(String(recetaForm.precio_unitario).replace(',', '.')) || 0,
+                        iva: parseFloat(String(recetaForm.iva).replace(',', '.')) || 0,
+                        precio_iva: parseFloat(String(recetaForm.precio_iva).replace(',', '.')) || 0,
+                        ganancia: parseFloat(String(recetaForm.ganancia).replace(',', '.')) || 0,
                       }) 
                     });
                     const d = await res.json();
@@ -3276,14 +3602,98 @@ export default function BakeryDriverApp() {
                 }} className="space-y-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="sm:col-span-2"><label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">Nombre de la receta</label>
-                      <input required value={recetaForm.nombre} onChange={e => setRecetaForm({...recetaForm, nombre: e.target.value})} className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-red" /></div>
+                      <input required value={recetaForm.nombre} onChange={e => {
+                        const nuevoNombre = e.target.value;
+                        const match = depositoArticulos.find((a: any) => a.nombre.trim().toLowerCase() === nuevoNombre.trim().toLowerCase());
+                        setRecetaForm((prev: any) => ({
+                          ...prev,
+                          nombre: nuevoNombre,
+                          ...(match ? { id_articulo_resultado: match.id } : {})
+                        }));
+                      }} className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-red" /></div>
                     <div><label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">Porciones producidas</label>
                       <input type="text" inputMode="decimal" required value={recetaForm.porciones} onChange={e => setRecetaForm({...recetaForm, porciones: e.target.value})} className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-red font-semibold" /></div>
-                    <div><label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">Artículo que produce</label>
-                      <select value={recetaForm.id_articulo_resultado} onChange={e => setRecetaForm({...recetaForm, id_articulo_resultado: e.target.value})} className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-red">
-                        <option value="" className="bg-zinc-900">Sin asignar</option>
-                        {depositoArticulos.map((a: any) => <option key={a.id} value={a.id} className="bg-zinc-900">{a.nombre}</option>)}
-                      </select></div>
+                    <div>
+                      <label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">Artículo que produce</label>
+                      {(() => {
+                        const selectedArticulo = depositoArticulos.find((a: any) => String(a.id) === String(recetaForm.id_articulo_resultado));
+                        if (selectedArticulo) {
+                          return (
+                            <div className="flex items-center justify-between w-full h-11 rounded-xl bg-emerald-500/10 border border-emerald-500/30 px-3 text-sm">
+                              <div className="flex items-center gap-2 truncate">
+                                <Package className="w-4 h-4 text-emerald-400 shrink-0" />
+                                <span className="font-semibold text-emerald-300 truncate">{selectedArticulo.nombre}</span>
+                              </div>
+                              <button 
+                                type="button" 
+                                onClick={() => { 
+                                  setRecetaForm({ ...recetaForm, id_articulo_resultado: '' }); 
+                                  setRecetaArticuloSearch(''); 
+                                }}
+                                className="text-xs text-zinc-400 hover:text-red-400 p-1 transition-colors"
+                                title="Cambiar / Quitar"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          );
+                        }
+                        
+                        const articulosFiltrados = depositoArticulos.filter((a: any) => 
+                          !recetaArticuloSearch.trim() || a.nombre.toLowerCase().includes(recetaArticuloSearch.toLowerCase())
+                        );
+
+                        return (
+                          <div className="relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                            <input
+                              type="text"
+                              placeholder="Buscar artículo..."
+                              value={recetaArticuloSearch}
+                              onFocus={() => setRecetaArticuloDropdownOpen(true)}
+                              onChange={e => {
+                                setRecetaArticuloSearch(e.target.value);
+                                setRecetaArticuloDropdownOpen(true);
+                              }}
+                              className="w-full h-11 pl-9 pr-4 rounded-xl bg-white/5 border border-white/10 text-sm text-white outline-none focus:border-brand-red placeholder:text-zinc-500"
+                            />
+                            {recetaArticuloDropdownOpen && (
+                              <div className="absolute left-0 right-0 top-full mt-1 max-h-48 overflow-y-auto bg-zinc-950 border border-white/10 rounded-xl shadow-2xl z-30 p-1 space-y-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setRecetaForm({ ...recetaForm, id_articulo_resultado: '' });
+                                    setRecetaArticuloDropdownOpen(false);
+                                    setRecetaArticuloSearch('');
+                                  }}
+                                  className="w-full text-left px-3 py-2 text-xs rounded-lg text-zinc-400 hover:bg-white/5 transition-colors italic"
+                                >
+                                  -- Sin asignar --
+                                </button>
+                                {articulosFiltrados.slice(0, 15).map((a: any) => (
+                                  <button
+                                    key={a.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setRecetaForm({ ...recetaForm, id_articulo_resultado: a.id });
+                                      setRecetaArticuloDropdownOpen(false);
+                                      setRecetaArticuloSearch('');
+                                    }}
+                                    className="w-full text-left px-3 py-2 text-xs rounded-lg hover:bg-white/10 text-white flex justify-between items-center transition-colors"
+                                  >
+                                    <span className="font-medium text-zinc-200 truncate">{a.nombre}</span>
+                                    <span className="text-[10px] text-zinc-400 font-mono shrink-0 ml-2">Stock dep: {a.stock_deposito}</span>
+                                  </button>
+                                ))}
+                                {articulosFiltrados.length === 0 && (
+                                  <p className="text-center text-xs text-zinc-500 py-2">No se encontró artículo</p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
                     <div className="sm:col-span-2"><label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">Descripción (opcional)</label>
                       <input value={recetaForm.descripcion} onChange={e => setRecetaForm({...recetaForm, descripcion: e.target.value})} className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-red" /></div>
                   </div>
@@ -3391,7 +3801,7 @@ export default function BakeryDriverApp() {
                                   placeholder="0"
                                   className="w-16 bg-transparent text-sm text-white outline-none text-right font-bold"
                                 />
-                                <span className="text-xs text-zinc-400 pl-1">{ing.unidad}</span>
+                                <input type="text" value={ing.unidad} onChange={e => { const upd = [...recetaIngredientes]; upd[idx].unidad = e.target.value; setRecetaIngredientes(upd); }} className="w-12 bg-transparent text-xs text-zinc-400 border-b border-white/10 outline-none focus:border-brand-red ml-1" />
                               </div>
                               <div className="w-20 text-right">
                                 <p className="text-[10px] text-zinc-500 uppercase font-mono">Subtotal</p>
@@ -3437,6 +3847,32 @@ export default function BakeryDriverApp() {
                       );
                     })()}
                   </div>
+                  <div className="border-t border-white/10 pt-4">
+                    <p className="text-xs text-zinc-400 uppercase tracking-widest font-semibold mb-3">Costos y Ganancias</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                                                  <div><label className="text-xs text-zinc-400 block mb-1">Costo Empleado</label>
+                        <input type="text" inputMode="decimal" value={recetaForm.empleado} onChange={e => setRecetaForm({...recetaForm, empleado: e.target.value})} className="w-full h-10 rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white outline-none focus:border-brand-red" />
+                      </div>
+                      <div><label className="text-xs text-zinc-400 block mb-1">Costo Elaboración</label>
+                        <input type="text" inputMode="decimal" value={recetaForm.costo_elaboracion} onChange={e => setRecetaForm({...recetaForm, costo_elaboracion: e.target.value})} className="w-full h-10 rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white outline-none focus:border-brand-red" />
+                      </div>
+                      <div><label className="text-xs text-zinc-400 block mb-1">Costo Unitario</label>
+                        <input type="text" inputMode="decimal" value={recetaForm.costo_unitario} onChange={e => setRecetaForm({...recetaForm, costo_unitario: e.target.value})} className="w-full h-10 rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white outline-none focus:border-brand-red" />
+                      </div>
+                      <div><label className="text-xs text-zinc-400 block mb-1">% Ganancia</label>
+                        <input type="text" inputMode="decimal" value={recetaForm.porcentaje_ganancia} onChange={e => setRecetaForm({...recetaForm, porcentaje_ganancia: e.target.value})} className="w-full h-10 rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white outline-none focus:border-brand-red" />
+                      </div>
+                      <div><label className="text-xs text-zinc-400 block mb-1">Precio Neto</label>
+                        <input type="text" inputMode="decimal" value={recetaForm.precio_unitario} onChange={e => setRecetaForm({...recetaForm, precio_unitario: e.target.value})} className="w-full h-10 rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white outline-none focus:border-brand-red" />
+                      </div>
+                      <div><label className="text-xs text-zinc-400 block mb-1">% IVA</label>
+                        <input type="text" inputMode="decimal" value={recetaForm.iva} onChange={e => setRecetaForm({...recetaForm, iva: e.target.value})} className="w-full h-10 rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white outline-none focus:border-brand-red" />
+                      </div>
+                      <div className="col-span-2 sm:col-span-3"><label className="text-xs text-emerald-400 font-bold block mb-1">Precio Final (con IVA)</label>
+                        <input type="text" inputMode="decimal" value={recetaForm.precio_iva} onChange={e => setRecetaForm({...recetaForm, precio_iva: e.target.value})} className="w-full h-11 rounded-xl bg-emerald-500/10 border border-emerald-500/20 px-4 font-bold text-lg text-emerald-400 outline-none focus:border-emerald-400" />
+                      </div>
+                    </div>
+                  </div>
                   <button type="submit" className="w-full bg-brand-red text-white h-11 rounded-xl font-bold shadow-lg shadow-brand-red/20">{recetaEditing ? 'Guardar Cambios' : 'Crear Receta'}</button>
                 </form>
               </div>
@@ -3448,7 +3884,7 @@ export default function BakeryDriverApp() {
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
               <div className="w-full max-w-md bg-zinc-900 border border-white/10 rounded-3xl p-6 space-y-4">
                 <div className="flex justify-between items-center">
-                  <h2 className="font-bold text-lg">▶ Ejecutar Receta</h2>
+                  <h2 className="font-bold text-lg"> –¶ Ejecutar Receta</h2>
                   <button onClick={() => setRecetaEjecutarModal(null)} className="text-zinc-400 hover:text-white"><X className="w-5 h-5" /></button>
                 </div>
                 <div className="bg-white/5 border border-white/10 rounded-xl p-3 space-y-1">
@@ -3462,14 +3898,27 @@ export default function BakeryDriverApp() {
                 </div>
                 <div className="space-y-1">
                   <p className="text-xs text-zinc-400 font-semibold uppercase tracking-widest">Consumo de MP:</p>
-                  {recetaEjecutarModal.ingredientes?.map((ing: any, i: number) => (
-                    <div key={i} className="flex justify-between text-xs">
-                      <span className="text-zinc-300">{ing.nombre}</span>
-                      <span className={`font-semibold ${ing.stock_deposito >= ing.cantidad * recetaEjecutarQty ? 'text-emerald-300' : 'text-red-400'}`}>
-                        {(ing.cantidad * recetaEjecutarQty).toFixed(2)} {ing.unidad} (disp: {ing.stock_deposito})
-                      </span>
-                    </div>
-                  ))}
+                  {recetaEjecutarModal.ingredientes?.map((ing: any, i: number) => {
+                    const cantTotal = ing.cantidad * recetaEjecutarQty;
+                    const u = (ing.unidad || '').toLowerCase().trim();
+                    const peso = ing.peso || 1;
+                    let consumo = cantTotal / peso;
+                    
+                    if (['g', 'gr', 'grs', 'gramos', 'gramo', 'ml', 'cc', 'cm3', 'mililitro', 'mililitros'].includes(u)) {
+                      consumo = cantTotal / (peso > 100 ? peso : peso * 1000);
+                    } else if (['kg', 'kgs', 'kilo', 'kilos', 'kilogramo', 'kilogramos', 'l', 'lt', 'lts', 'litro', 'litros'].includes(u)) {
+                      consumo = cantTotal / (peso > 100 ? peso / 1000 : peso);
+                    }
+
+                    return (
+                      <div key={i} className="flex justify-between text-xs">
+                        <span className="text-zinc-300">{ing.nombre}</span>
+                        <span className={`font-semibold ${ing.stock_deposito >= consumo ? 'text-emerald-300' : 'text-red-400'}`}>
+                          {cantTotal.toFixed(2)} {ing.unidad} (disp: {ing.stock_deposito.toFixed(2)})
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
                 <button onClick={async () => {
                   try {
@@ -3636,8 +4085,8 @@ export default function BakeryDriverApp() {
             </div>
           )}
 
-          {/* ── DEPÓSITO ── */}
-          {activeTab === "deposito" && isAdmin && (
+          {/* ── DEPÃ“SITO ── */}
+          {activeTab === "deposito" && (isAdmin || isProduccion) && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <h1 className="text-2xl font-bold">Depósito</h1>
@@ -3708,16 +4157,17 @@ export default function BakeryDriverApp() {
                             <div className="grid grid-cols-3 gap-2 text-center text-xs">
                               <div className="bg-black/20 rounded-xl p-2">
                                 <p className="text-zinc-400">En Depósito</p>
-                                <p className="font-bold text-white text-lg">{a.stock_deposito}</p>
+                                <div className="text-center pt-1"><InlineStockEdit id={a.id} initialStock={a.stock_deposito} onSave={handleInlineAjuste} /></div>
                               </div>
                               <div className="bg-red-500/10 rounded-xl p-2">
                                 <p className="text-red-400">Reservado</p>
                                 <p className="font-bold text-red-300 text-lg">{a.total_reservado}</p>
-                                {(a.stock_reservado_v1 > 0 || a.stock_reservado_v2 > 0) && (
-                                  <p className="text-[10px] text-zinc-500 mt-0.5">
-                                    {a.stock_reservado_v1 > 0 && `M1: ${a.stock_reservado_v1} `}
-                                    {a.stock_reservado_v2 > 0 && `M2: ${a.stock_reservado_v2}`}
-                                  </p>
+                                {(Object.keys(a.stock_repartidores || {}).length > 0) && (
+                                  <div className="text-[10px] text-zinc-500 mt-0.5 space-y-0.5">
+                                    {Object.entries(a.stock_repartidores || {}).map(([id, rep]: [string, any]) => 
+                                      rep.cantidad_reservada > 0 ? <p key={id}>Rep {id}: {rep.cantidad_reservada}</p> : null
+                                    )}
+                                  </div>
                                 )}
                               </div>
                               <div className={`rounded-xl p-2 ${a.disponible > 0 ? 'bg-emerald-500/10' : 'bg-zinc-800'}`}>
@@ -3725,10 +4175,13 @@ export default function BakeryDriverApp() {
                                 <p className={`font-bold text-lg ${a.disponible > 0 ? 'text-emerald-300' : 'text-zinc-500'}`}>{a.disponible}</p>
                               </div>
                             </div>
-                            <div className="flex gap-2 text-[10px] text-zinc-500 border-t border-white/5 pt-2">
-                              <span>🏭 Panadería: <strong className="text-zinc-300">{a.stock_panaderia}</strong></span>
-                              <span>🚐 M1: <strong className="text-zinc-300">{a.stock_vehiculo1}</strong></span>
-                              <span>🚐 M2: <strong className="text-zinc-300">{a.stock_vehiculo2}</strong></span>
+                            <div className="flex flex-col gap-1 text-[10px] text-zinc-500 border-t border-white/5 pt-2">
+                              <span>ðŸª Panadería: <strong className="text-zinc-300">{a.stock_panaderia}</strong></span>
+                              <div className="flex gap-2 flex-wrap">
+                                {Object.entries(a.stock_repartidores || {}).map(([id, rep]: [string, any]) => 
+                                  <span key={id}>Ã°Å¸Å¡  Rep {id}: <strong className="text-zinc-300">{rep.cantidad}</strong></span>
+                                )}
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -3778,17 +4231,22 @@ export default function BakeryDriverApp() {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         {filteredDepositoMP.slice((depositoPageMP - 1) * 10, depositoPageMP * 10).map(mp => (
                           <div key={mp.id} className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
-                            <div className="flex justify-between items-center">
+                            <div className="flex justify-between items-start">
                               <p className="font-semibold text-sm text-white">{mp.nombre}</p>
-                              <button onClick={() => { setDepositoModal('salida_mp'); setDepositoModalItem(mp); }}
-                                className="text-[10px] px-2 py-1 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors shrink-0">
-                                ↓ Registrar Salida
-                              </button>
+                              <div className="flex flex-wrap gap-1.5 shrink-0 justify-end">
+                                <button onClick={() => { setDepositoModal('entrada'); setDepositoModalItem(mp); }}
+                                  className="text-[10px] px-2 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-lg hover:bg-emerald-500/20 transition-colors">+ Ent</button>
+                                <button onClick={() => { setDepositoModal('salida_mp'); setDepositoModalItem(mp); }}
+                                  className="text-[10px] px-2 py-1 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors shrink-0">
+                                    Salida
+                                </button>
+                              </div>
                             </div>
                             <div className="grid grid-cols-2 gap-2 text-center text-xs">
                               <div className="bg-black/20 rounded-xl p-2">
                                 <p className="text-zinc-400">En Depósito</p>
-                                <p className="font-bold text-white text-lg">{mp.stock_deposito} <span className="text-sm text-zinc-500 font-normal">{mp.unidad_medida || 'kg'}</span></p>
+                                <div className="text-center pt-1"><InlineStockEdit id={mp.id} initialStock={mp.stock_deposito} onSave={handleInlineAjusteMP} /></div>
+                                <p className="text-[10px] text-zinc-500 font-normal">{mp.unidad_medida || 'kg'}</p>
                               </div>
                               <div className="bg-zinc-800 rounded-xl p-2">
                                 <p className="text-zinc-500">En Uso / Panadería</p>
@@ -3904,6 +4362,7 @@ export default function BakeryDriverApp() {
                                 </p>
                                 <p className="text-xs text-zinc-400">{m.item_nombre}</p>
                                 {m.motivo && <p className="text-[10px] text-zinc-600 italic">"{m.motivo}"</p>}
+                                <p className="text-[10px] text-zinc-500 mt-1">👤 {m.user?.name || 'Sistema'}</p>
                               </div>
                             </div>
                             <div className="text-right shrink-0 flex flex-col items-end justify-center">
@@ -3954,8 +4413,8 @@ export default function BakeryDriverApp() {
                         {depositoModal === 'entrada' ? '+ Registrar Entrada al Depósito' :
                          depositoModal === 'editar_entrada' ? 'Editar Entrada (ID: ' + depositoModalItem?.id + ')' :
                          depositoModal === 'distribuir' ? '→ Distribuir desde Depósito' :
-                         depositoModal === 'devolucion' ? '← Devolver al Depósito' :
-                         '↓ Salida de Materia Prima'}
+                         depositoModal === 'devolucion' ? 'Ã¢ €   Devolver al Depósito' :
+                         'Ã¢ €  €œ Salida de Materia Prima'}
                       </h2>
                       <button onClick={() => setDepositoModal(null)} className="p-2 rounded-full bg-white/5 border border-white/10">
                         <X className="h-4 w-4 text-zinc-400" />
@@ -3977,8 +4436,8 @@ export default function BakeryDriverApp() {
 
                       if (depositoModal === 'distribuir' || depositoModal === 'devolucion') {
                         body.cantidad_panaderia = fd.get('cantidad_panaderia') ? parseFloat(fd.get('cantidad_panaderia') as string) : 0;
-                        body.cantidad_v1 = fd.get('cantidad_v1') ? parseFloat(fd.get('cantidad_v1') as string) : 0;
-                        body.cantidad_v2 = fd.get('cantidad_v2') ? parseFloat(fd.get('cantidad_v2') as string) : 0;
+                        body.repartidor_id = fd.get('repartidor_id') ? parseInt(fd.get('repartidor_id') as string) : null;
+                        body.qty_repartidor = fd.get('qty_repartidor') ? parseFloat(fd.get('qty_repartidor') as string) : 0;
                       } else {
                         body.cantidad = parseFloat(fd.get('cantidad') as string);
                       }
@@ -4077,26 +4536,27 @@ export default function BakeryDriverApp() {
                         <input type="hidden" name="tipo_item" value={depositoModal === 'salida_mp' || depositoModalItem?.tipo === 'materia_prima' ? 'materia_prima' : 'articulo'} />
                       </div>
                       
-                      {/* Cantidades Multiples (distribuir o devolucion) */}
+                      {/* Cantidades (distribuir o devolucion) */}
                       {(depositoModal === 'distribuir' || depositoModal === 'devolucion') && (
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="grid grid-cols-2 gap-4">
                           <div>
-                            <label className="text-[10px] text-zinc-400 uppercase tracking-widest mb-1.5 block text-center">Panadería</label>
+                            <label className="text-[10px] text-zinc-400 uppercase tracking-widest mb-1.5 block">Panadería</label>
                             <input name="cantidad_panaderia" type="number" step="0.01" min="0" placeholder="0"
                               defaultValue={depositoModal === 'devolucion' && depositoModalItem ? depositoModalItem.stock_panaderia : undefined}
-                              className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-2 text-center text-sm text-white outline-none focus:border-brand-yellow" />
+                              className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-yellow" />
                           </div>
                           <div>
-                            <label className="text-[10px] text-zinc-400 uppercase tracking-widest mb-1.5 block text-center">Móvil 1</label>
-                            <input name="cantidad_v1" type="number" step="0.01" min="0" placeholder="0"
-                              defaultValue={depositoModal === 'devolucion' && depositoModalItem ? depositoModalItem.stock_vehiculo1 : undefined}
-                              className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-2 text-center text-sm text-emerald-300 outline-none focus:border-emerald-500" />
-                          </div>
-                          <div>
-                            <label className="text-[10px] text-zinc-400 uppercase tracking-widest mb-1.5 block text-center">Móvil 2</label>
-                            <input name="cantidad_v2" type="number" step="0.01" min="0" placeholder="0"
-                              defaultValue={depositoModal === 'devolucion' && depositoModalItem ? depositoModalItem.stock_vehiculo2 : undefined}
-                              className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-2 text-center text-sm text-blue-300 outline-none focus:border-blue-500" />
+                            <label className="text-[10px] text-zinc-400 uppercase tracking-widest mb-1.5 block">Repartidor (opcional)</label>
+                            <div className="flex gap-2">
+                              <select name="repartidor_id" className="flex-1 h-11 rounded-xl bg-white/5 border border-white/10 px-2 text-sm text-white outline-none focus:border-emerald-500">
+                                <option value="">Seleccione...</option>
+                                {repartidores.map(r => (
+                                  <option key={r.id} value={r.id}>{r.name}</option>
+                                ))}
+                              </select>
+                              <input name="qty_repartidor" type="number" step="0.01" min="0" placeholder="Cant."
+                                className="w-20 h-11 rounded-xl bg-white/5 border border-white/10 px-2 text-center text-sm text-emerald-300 outline-none focus:border-emerald-500" />
+                            </div>
                           </div>
                         </div>
                       )}
@@ -4131,10 +4591,63 @@ export default function BakeryDriverApp() {
               )}
             </div>
           )}
+          {/* ── DESPACHO A REPARTIDOR ── */}
+          {activeTab === "despacho" && isAdmin && (
+            <div className="p-4">
+              <DespachoRepartidor 
+                repartidores={repartidores} 
+                articulos={depositoArticulos} 
+                token={token!} 
+                apiUrl={API_URL} 
+                onSuccess={() => { fetchDeposito(); }} 
+              />
+            </div>
+          )}
+
+          {/* ── USUARIOS CRUD ── */}
+          {activeTab === "usuarios" && isAdmin && (
+            <div className="p-4">
+              <UsuariosCrud token={token!} apiUrl={API_URL} />
+            </div>
+          )}
 
           {/* ── MIS VENTAS ── */}
           {activeTab === "ventas" && (
             <div className="space-y-4">
+              
+              {/* Banner de Mi Turno / Caja (Solo visible para perfil Vendedor) */}
+              {isVendedor && (
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div>
+                    <h3 className="font-bold text-white flex items-center gap-2">
+                      {cajaTurnoActivo ? <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" /> : <span className="w-2 h-2 rounded-full bg-red-500" />}
+                      {cajaTurnoActivo ? "Caja Abierta" : "Caja Cerrada"}
+                    </h3>
+                    <p className="text-sm text-zinc-400">
+                      {cajaTurnoActivo 
+                        ? `Abierta hoy a las ${new Date(cajaTurnoActivo.fecha_apertura).toLocaleTimeString('es-AR', {hour: '2-digit', minute:'2-digit'})} hs`
+                        : "La caja se encuentra cerrada. Puedes abrirla para registrar el monto inicial."}
+                    </p>
+                  </div>
+                  <div>
+                    {cajaTurnoActivo ? (
+                      <button onClick={() => setCajaTurnoModal('cerrar')} className="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 rounded-xl font-bold text-sm transition-colors">
+                        Cerrar Caja
+                      </button>
+                    ) : (
+                      <button onClick={() => {
+                        setCajaTurnoModal('abrir');
+                        const now = new Date();
+                        const tzOffset = now.getTimezoneOffset() * 60000;
+                        setCajaFechaApertura(new Date(Date.now() - tzOffset).toISOString().slice(0, 16));
+                      }} className="px-4 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/30 rounded-xl font-bold text-sm transition-colors">
+                        Abrir Caja
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div className="flex flex-col gap-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <h1 className="text-2xl font-bold">Historial {isAdmin ? "(Admin)" : ""}</h1>
@@ -4226,14 +4739,18 @@ export default function BakeryDriverApp() {
               )}
 
               {isAdmin && (
-                <div className="flex bg-black/20 p-1 rounded-xl border border-white/5 w-full sm:w-fit">
+                <div className="flex bg-black/20 p-1 rounded-xl border border-white/5 w-full sm:w-fit flex-wrap">
                   <button onClick={() => setHistoryTab('movimientos')}
-                    className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${historyTab === 'movimientos' ? 'bg-white/10 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}>
+                    className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${historyTab === 'movimientos' ? 'bg-white/10 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}>
                     <ClipboardList className="w-4 h-4" /> Movimientos
                   </button>
                   <button onClick={() => setHistoryTab('estadisticas')}
-                    className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${historyTab === 'estadisticas' ? 'bg-brand-red/20 text-brand-yellow' : 'text-zinc-500 hover:text-zinc-300'}`}>
+                    className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${historyTab === 'estadisticas' ? 'bg-brand-red/20 text-brand-yellow' : 'text-zinc-500 hover:text-zinc-300'}`}>
                     <PieChartIcon className="w-4 h-4" /> Estadísticas
+                  </button>
+                  <button onClick={() => { setHistoryTab('cierres'); fetchCierres(); }}
+                    className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${historyTab === 'cierres' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'text-zinc-500 hover:text-zinc-300'}`}>
+                    <Archive className="w-4 h-4" /> Cierres de Caja
                   </button>
                 </div>
               )}
@@ -4285,6 +4802,12 @@ export default function BakeryDriverApp() {
                                   {caja.total_movimientos !== undefined && (
                                     <span className="text-zinc-500 ml-1.5 font-normal">({caja.total_movimientos} mov.)</span>
                                   )}
+                                </span>
+                              </div>
+                              <div className="flex justify-between items-center text-xs pt-1">
+                                <span className="text-zinc-500">Ticket Promedio</span>
+                                <span className="font-semibold text-emerald-400">
+                                  ${caja.total_movimientos > 0 ? Math.round(caja.total_facturado / caja.total_movimientos).toLocaleString('es-AR') : 0}
                                 </span>
                               </div>
                             </div>
@@ -4430,7 +4953,7 @@ export default function BakeryDriverApp() {
                     <div className="flex justify-center py-10"><RefreshCw className="w-6 h-6 text-brand-red animate-spin" /></div>
                   )}
                 </>
-              ) : (
+              ) : historyTab === 'estadisticas' ? (
                 <div className="space-y-6">
                   {productStats.length === 0 ? (
                     <p className="text-center text-zinc-500 text-sm mt-10">Sin ventas de productos de reparto en esta fecha.</p>
@@ -4519,6 +5042,97 @@ export default function BakeryDriverApp() {
                     </>
                   )}
                 </div>
+              ) : (
+                /* ── Sub-tab Cierres de Caja ── */
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-base font-bold text-white">Historial de Cierres de Caja</h3>
+                      <p className="text-xs text-zinc-400">Control de turnos, arqueos de mostrador y diferencias de efectivo.</p>
+                    </div>
+                    <button onClick={fetchCierres} disabled={loadingCierres}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs font-semibold text-zinc-300 transition-colors">
+                      <RefreshCw className={`w-3.5 h-3.5 ${loadingCierres ? 'animate-spin' : ''}`} />
+                      Actualizar
+                    </button>
+                  </div>
+
+                  {loadingCierres && cierresList.length === 0 ? (
+                    <div className="flex justify-center py-12"><RefreshCw className="w-6 h-6 text-brand-red animate-spin" /></div>
+                  ) : cierresList.length === 0 ? (
+                    <div className="text-center py-12 border border-white/5 bg-white/5 rounded-2xl">
+                      <Archive className="w-8 h-8 text-zinc-500 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm font-semibold text-zinc-400">No hay registros de cierre de caja aún.</p>
+                      <p className="text-xs text-zinc-600 mt-1">Cuando abras y cierres un turno de caja, aparecerá listado aquí.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {cierresList.map((c: any) => {
+                        const isAbierta = c.estado === 'abierta';
+                        const fechaAperturaStr = new Date(c.fecha_apertura).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                        const horaAperturaStr = new Date(c.fecha_apertura).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+                        const horaCierreStr = c.fecha_cierre ? new Date(c.fecha_cierre).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : null;
+                        const diff = Number(c.diferencia) || 0;
+
+                        return (
+                          <div key={c.id} 
+                            onClick={() => setSelectedCierreDetail(c)}
+                            className="bg-white/5 hover:bg-white/[0.08] border border-white/10 rounded-2xl p-4 transition-all cursor-pointer space-y-3">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/5 pb-2.5">
+                              <div className="flex items-center gap-2">
+                                <span className={`w-2.5 h-2.5 rounded-full ${isAbierta ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-500'}`} />
+                                <span className="font-bold text-white text-sm">
+                                  {fechaAperturaStr} · {horaAperturaStr} hs {horaCierreStr ? `a ${horaCierreStr} hs` : '(En curso)'}
+                                </span>
+                                <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${isAbierta ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/10 text-zinc-400'}`}>
+                                  {isAbierta ? 'Abierta' : 'Cerrada'}
+                                </span>
+                              </div>
+                              <span className="text-xs text-zinc-400">
+                                Cajero: <strong className="text-zinc-200">{c.user?.name || 'Sistema'}</strong>
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                              <div className="bg-black/20 rounded-xl p-2.5">
+                                <span className="text-zinc-500 block text-[10px] uppercase font-bold">Monto Apertura</span>
+                                <span className="font-bold text-zinc-200 text-sm">${Number(c.monto_apertura || 0).toLocaleString('es-AR')}</span>
+                              </div>
+                              <div className="bg-black/20 rounded-xl p-2.5">
+                                <span className="text-zinc-500 block text-[10px] uppercase font-bold">Ventas Mostrador</span>
+                                <span className="font-bold text-brand-yellow text-sm">${Number(c.ventas_panaderia_total || 0).toLocaleString('es-AR')}</span>
+                              </div>
+                              <div className="bg-black/20 rounded-xl p-2.5">
+                                <span className="text-zinc-500 block text-[10px] uppercase font-bold">Efectivo Esperado</span>
+                                <span className="font-bold text-zinc-200 text-sm">${Number(c.efectivo_esperado || 0).toLocaleString('es-AR')}</span>
+                              </div>
+                              <div className="bg-black/20 rounded-xl p-2.5">
+                                <span className="text-zinc-500 block text-[10px] uppercase font-bold">Efectivo Real</span>
+                                <span className="font-bold text-emerald-400 text-sm">${Number(c.efectivo_real || 0).toLocaleString('es-AR')}</span>
+                              </div>
+                            </div>
+
+                            {!isAbierta && (
+                              <div className="flex items-center justify-between pt-1 text-xs">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-zinc-500">Diferencia de caja:</span>
+                                  {diff === 0 ? (
+                                    <span className="font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md">✓ $0 (Exacto)</span>
+                                  ) : diff > 0 ? (
+                                    <span className="font-bold text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-md">+${diff.toLocaleString('es-AR')} (Sobrante)</span>
+                                  ) : (
+                                    <span className="font-bold text-red-400 bg-red-500/10 px-2 py-0.5 rounded-md">-${Math.abs(diff).toLocaleString('es-AR')} (Faltante)</span>
+                                  )}
+                                </div>
+                                <span className="text-brand-red text-[11px] font-semibold flex items-center gap-1">Ver desglose completo →</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -4560,12 +5174,29 @@ export default function BakeryDriverApp() {
         )}
 
         {/* ── NAV ── */}
-        <nav className="md:hidden fixed bottom-0 left-1/2 z-30 flex h-24 w-full max-w-md -translate-x-1/2 items-center justify-around border-t border-white/10 bg-black/70 px-2 backdrop-blur-3xl">
-          <NavButton icon={Truck}        label="Pedidos" value="pedidos" badge={deliveries.filter(d => d.status === "Late").length} />
-          {!isVendedor && <NavButton icon={Package} label="Stock" value="stock" />}
-          <NavButton icon={ShoppingCart} label="Venta"   value="pos" prominent />
-          {!isVendedor && <NavButton icon={Users}        label="Clientes" value="clientes" />}
-          <NavButton icon={Receipt}      label="Historial" value="ventas" />
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 h-24 w-full border-t border-white/10 bg-black/70 backdrop-blur-3xl overflow-x-auto overflow-y-visible [&::-webkit-scrollbar]:hidden">
+          <div className={`flex items-center gap-6 px-6 h-full ${(isAdmin || isProduccion) ? 'justify-start min-w-max' : 'justify-around w-full'}`}>
+            {!isProduccion && (
+              <>
+                <NavButton icon={Truck}        label="Pedidos" value="pedidos" badge={deliveries.filter(d => d.status === "Late").length} />
+                {!isVendedor && <NavButton icon={Package} label="Stock" value="stock" />}
+                <NavButton icon={ShoppingCart} label="Venta"   value="pos" prominent />
+                {!isVendedor && <NavButton icon={Users}        label="Clientes" value="clientes" />}
+                <NavButton icon={Receipt}      label="Historial" value="ventas" />
+              </>
+            )}
+            
+            {(isAdmin || isProduccion) && (
+              <>
+                {!isProduccion && <div className="w-[1px] h-10 bg-white/10 mx-2"></div>}
+                <NavButton icon={Warehouse}    label="Depósito" value="deposito" badge={depositoReservasPendientes.length} />
+                {isAdmin && <NavButton icon={ClipboardList} label="Materias" value="materias" />}
+                <NavButton icon={CheckCircle2} label="Recetas" value="recetas" />
+                {isAdmin && <NavButton icon={Truck}        label="Despacho" value="despacho" />}
+                {isAdmin && <NavButton icon={UserIcon}     label="Usuarios" value="usuarios" />}
+              </>
+            )}
+          </div>
         </nav>
       </div>
       </div>
@@ -4593,6 +5224,7 @@ export default function BakeryDriverApp() {
         pedidoItems={pedidoCheckout?.items}
         pedidoCliente={pedidoCheckout?.cliente ?? null}
         isEditing={!!editingPedido}
+        isVendedor={isVendedor}
         onSuccess={() => {
           setCart({});
           setEditingPedido(null);
@@ -4940,6 +5572,360 @@ export default function BakeryDriverApp() {
           </div>
         </div>
       )}
+
+      {/* Modal Abrir/Cerrar Caja (Inspirado en el monolito AdminCajas) */}
+      {cajaTurnoModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto" onClick={(e) => { if (e.target === e.currentTarget) setCajaTurnoModal(null); }}>
+          <div className="bg-[#1c1c1e] w-full max-w-3xl rounded-3xl overflow-hidden border border-white/10 shadow-2xl flex flex-col my-8">
+            {/* Header */}
+            <div className={`p-6 border-b border-white/10 flex justify-between items-center ${cajaTurnoModal === 'cerrar' ? 'bg-red-500/10 border-l-8 border-l-red-500' : 'bg-emerald-500/10 border-l-8 border-l-emerald-500'}`}>
+              <div className="flex items-center gap-3">
+                <div className={`p-3 rounded-2xl ${cajaTurnoModal === 'cerrar' ? 'bg-red-500/20 text-red-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                  <CircleDollarSign className="w-6 h-6" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white">
+                    {cajaTurnoModal === 'abrir' ? "🔓 Abrir Turno de Caja" : "🔒 Arqueo y Cierre de Caja"}
+                  </h2>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    {cajaTurnoModal === 'abrir' 
+                      ? "Registra el monto inicial de apertura para comenzar la jornada." 
+                      : "Verifica los números del día, ingresa el dinero físico contado y registra el cierre."}
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setCajaTurnoModal(null)} className="p-2 bg-white/5 rounded-full hover:bg-white/10 text-zinc-400 hover:text-white transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6 max-h-[75vh] overflow-y-auto">
+              {cajaTurnoModal === 'abrir' ? (
+                <div className="space-y-4">
+                  <div className="bg-white/5 p-5 rounded-2xl border border-white/10">
+                    <label className="text-xs text-zinc-400 uppercase tracking-widest font-bold mb-2 block">
+                      Monto de Apertura (Fondo / Cambio Inicial) <span className="text-red-400">*</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-2xl font-bold text-zinc-500">$</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={cajaMontoApertura}
+                        onChange={(e) => setCajaMontoApertura(e.target.value)}
+                        placeholder="0.00"
+                        className="w-full h-14 bg-black/50 border-2 border-white/10 rounded-2xl pl-10 pr-4 text-white text-2xl font-black outline-none focus:border-emerald-500 transition-colors"
+                      />
+                    </div>
+                    <p className="text-xs text-zinc-500 mt-2">
+                      Ingresa el efectivo físico que hay actualmente en el cajón de la panadería.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {/* SECCIÓN ARQUEO (3 COLUMNAS: ESPERADO, REAL, DIFERENCIA) */}
+                  <div className="bg-gradient-to-br from-white/5 to-white/[0.02] p-6 rounded-2xl border-2 border-emerald-500/30 shadow-lg">
+                    <h3 className="text-sm font-bold text-emerald-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                      💰 Arqueo de Caja - Conteo de Efectivo
+                    </h3>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {/* 1. Efectivo Esperado */}
+                      <div className="bg-black/40 p-4 rounded-xl border border-blue-500/30 flex flex-col justify-between">
+                        <label className="text-xs text-blue-400 font-semibold uppercase tracking-wider block mb-1">
+                          Efectivo Esperado
+                        </label>
+                        <div className="text-2xl font-black text-blue-400">
+                          ${Number(cajaTurnoActivo?.efectivo_esperado || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                        <p className="text-[10px] text-zinc-500 mt-2">
+                          Apertura + Ventas Mostrador + Ingresos - Salidas - Compras
+                        </p>
+                      </div>
+
+                      {/* 2. Efectivo Real (Editable) */}
+                      <div className="bg-black/40 p-4 rounded-xl border-2 border-emerald-500/50 flex flex-col justify-between">
+                        <label className="text-xs text-emerald-400 font-bold uppercase tracking-wider block mb-1">
+                          Efectivo Real (Contado) <span className="text-red-400">*</span>
+                        </label>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-lg font-bold text-emerald-500">$</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={cajaEfectivoReal}
+                            onChange={(e) => setCajaEfectivoReal(e.target.value)}
+                            placeholder="0.00"
+                            className="w-full h-11 bg-black/60 border border-emerald-500/40 rounded-lg pl-8 pr-3 text-emerald-400 text-xl font-black outline-none focus:border-emerald-400"
+                          />
+                        </div>
+                        <p className="text-[10px] text-zinc-500 mt-2">
+                          Dinero físico contado en mano
+                        </p>
+                      </div>
+
+                      {/* 3. Diferencia */}
+                      {(() => {
+                        const real = parseFloat(String(cajaEfectivoReal)) || 0;
+                        const esp = parseFloat(String(cajaTurnoActivo?.efectivo_esperado)) || 0;
+                        const diff = real - esp;
+                        const isDiffZero = Math.abs(diff) < 0.01;
+                        return (
+                          <div className={`p-4 rounded-xl border-2 flex flex-col justify-between ${isDiffZero ? 'bg-black/40 border-zinc-700 text-zinc-300' : diff > 0 ? 'bg-emerald-950/20 border-emerald-500/50 text-emerald-400' : 'bg-red-950/20 border-red-500/50 text-red-400'}`}>
+                            <label className="text-xs font-semibold uppercase tracking-wider block mb-1">
+                              Diferencia
+                            </label>
+                            <div className="text-2xl font-black">
+                              {diff > 0 ? '+' : ''}${diff.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                            <p className="text-[10px] font-bold mt-2">
+                              {isDiffZero ? "✅ Arqueo Exacto" : diff > 0 ? "📈 Sobrante de Caja" : "📉 Faltante de Caja"}
+                            </p>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* DESGLOSE DETALLADO DEL MOSTRADOR */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* Ventas Panadería */}
+                    <div className="bg-black/30 p-4 rounded-2xl border border-white/10">
+                      <div className="flex justify-between items-center mb-3">
+                        <span className="text-xs font-bold text-yellow-400 uppercase tracking-wider flex items-center gap-1.5">
+                          🥖 Ventas Mostrador (Vendedor)
+                        </span>
+                        <span className="text-xs font-bold bg-yellow-500/20 text-yellow-300 px-2.5 py-0.5 rounded-full">
+                          ${Number(cajaTurnoActivo?.ventas_panaderia_total || 0).toLocaleString('es-AR')}
+                        </span>
+                      </div>
+                      <div className="space-y-1.5 text-xs">
+                        <div className="flex justify-between text-zinc-400">
+                          <span className="font-semibold text-yellow-300">Efectivo en Caja:</span>
+                          <span className="font-bold text-yellow-400 text-sm">${Number(cajaTurnoActivo?.ventas_panaderia_efectivo || 0).toLocaleString('es-AR')}</span>
+                        </div>
+                        <div className="flex justify-between text-zinc-400">
+                          <span>Transferencia:</span>
+                          <span className="font-semibold text-zinc-200">${Number(cajaTurnoActivo?.ventas_panaderia_transferencia || 0).toLocaleString('es-AR')}</span>
+                        </div>
+                        <div className="flex justify-between text-zinc-400">
+                          <span>Tarjeta:</span>
+                          <span className="font-semibold text-zinc-200">${Number(cajaTurnoActivo?.ventas_panaderia_tarjeta || 0).toLocaleString('es-AR')}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Movimientos de Caja */}
+                    <div className="bg-black/30 p-4 rounded-2xl border border-white/10">
+                      <div className="flex justify-between items-center mb-3">
+                        <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                          📥 Movimientos de Caja
+                        </span>
+                      </div>
+                      <div className="space-y-1.5 text-xs">
+                        <div className="flex justify-between text-zinc-400">
+                          <span>Fondo Apertura:</span>
+                          <span className="font-semibold text-zinc-200">${Number(cajaTurnoActivo?.monto_apertura || 0).toLocaleString('es-AR')}</span>
+                        </div>
+                        <div className="flex justify-between text-zinc-400">
+                          <span>Cobros Deuda (Ingresos):</span>
+                          <span className="font-semibold text-emerald-400">+ ${Number(cajaTurnoActivo?.ingresos || 0).toLocaleString('es-AR')}</span>
+                        </div>
+                        <div className="flex justify-between text-zinc-400">
+                          <span>Salidas de Caja:</span>
+                          <span className="font-semibold text-red-400">- ${Number(cajaTurnoActivo?.salidas || 0).toLocaleString('es-AR')}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Compras y Gastos en Efectivo */}
+                    <div className="bg-black/30 p-4 rounded-2xl border border-white/10">
+                      <div className="flex justify-between items-center mb-3">
+                        <span className="text-xs font-bold text-red-400 uppercase tracking-wider">
+                          🛒 Gastos Pagados de Caja
+                        </span>
+                      </div>
+                      <div className="space-y-1.5 text-xs">
+                        <div className="flex justify-between text-zinc-400">
+                          <span>Compras en Efectivo:</span>
+                          <span className="font-semibold text-red-400">- ${Number(cajaTurnoActivo?.compras_efectivo || 0).toLocaleString('es-AR')}</span>
+                        </div>
+                        <div className="flex justify-between text-zinc-400">
+                          <span>Total Compras del Día:</span>
+                          <span className="font-semibold text-zinc-200">${Number(cajaTurnoActivo?.monto_total_compras || 0).toLocaleString('es-AR')}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Observaciones */}
+                  <div className="bg-black/30 p-4 rounded-2xl border border-white/10">
+                    <label className="text-xs text-zinc-400 uppercase tracking-widest font-semibold mb-2 block">
+                      Observaciones de Cierre (Opcional)
+                    </label>
+                    <textarea
+                      value={cajaObservaciones}
+                      onChange={(e) => setCajaObservaciones(e.target.value)}
+                      placeholder="Ej: Faltante de $50 por cambio dado incorrectamente, o retiros de socios..."
+                      rows={2}
+                      className="w-full bg-black/50 border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-red-500 resize-none transition-colors"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-5 border-t border-white/10 bg-black/40 flex justify-end gap-3">
+              <button 
+                onClick={() => setCajaTurnoModal(null)} 
+                className="px-6 py-3 bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white rounded-xl font-bold text-sm transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={cajaTurnoModal === 'abrir' ? handleAbrirCaja : handleCerrarCaja}
+                className={`px-8 py-3 rounded-xl font-bold text-sm text-white shadow-lg transition-all ${
+                  cajaTurnoModal === 'abrir' 
+                    ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/30' 
+                    : 'bg-red-600 hover:bg-red-500 shadow-red-900/30'
+                }`}
+              >
+                {cajaTurnoModal === 'abrir' ? "Abrir Caja" : "Confirmar Cierre de Caja"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Detalle de Cierre de Caja */}
+      {selectedCierreDetail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) setSelectedCierreDetail(null); }}>
+          <div className="bg-[#1c1c1e] w-full max-w-lg rounded-3xl overflow-hidden border border-white/10 shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/5">
+              <div>
+                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                  <span>Cierre de Caja #{selectedCierreDetail.id}</span>
+                  <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${selectedCierreDetail.estado === 'abierta' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/10 text-zinc-400'}`}>
+                    {selectedCierreDetail.estado}
+                  </span>
+                </h2>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Cajero: <strong className="text-zinc-200">{selectedCierreDetail.user?.name || 'Sistema'}</strong> · {new Date(selectedCierreDetail.fecha_apertura).toLocaleDateString('es-AR')}
+                </p>
+              </div>
+              <button onClick={() => setSelectedCierreDetail(null)} className="p-2 bg-white/5 rounded-full hover:bg-white/10 transition-colors">
+                <X className="w-5 h-5 text-zinc-400" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 overflow-y-auto">
+              {/* Horarios */}
+              <div className="grid grid-cols-2 gap-3 bg-black/20 p-3 rounded-2xl text-xs">
+                <div>
+                  <span className="text-zinc-500 block text-[10px] uppercase font-bold">Apertura</span>
+                  <p className="font-semibold text-white mt-0.5">{new Date(selectedCierreDetail.fecha_apertura).toLocaleString('es-AR')}</p>
+                </div>
+                <div>
+                  <span className="text-zinc-500 block text-[10px] uppercase font-bold">Cierre</span>
+                  <p className="font-semibold text-white mt-0.5">{selectedCierreDetail.fecha_cierre ? new Date(selectedCierreDetail.fecha_cierre).toLocaleString('es-AR') : 'En curso'}</p>
+                </div>
+              </div>
+
+              {/* Arqueo Físico de Mostrador */}
+              <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-2 text-xs">
+                <p className="font-bold text-sm text-white mb-2 pb-1 border-b border-white/5">Arqueo Físico (Efectivo en Cajón)</p>
+                <div className="flex justify-between items-center text-zinc-300">
+                  <span>Monto Apertura (Cambio base):</span>
+                  <span className="font-mono font-bold">+${Number(selectedCierreDetail.monto_apertura || 0).toLocaleString('es-AR')}</span>
+                </div>
+                <div className="flex justify-between items-center text-emerald-400">
+                  <span>Ventas Mostrador (Efectivo):</span>
+                  <span className="font-mono font-bold">+${Number(selectedCierreDetail.ventas_panaderia_efectivo || 0).toLocaleString('es-AR')}</span>
+                </div>
+                {Number(selectedCierreDetail.ingresos || 0) > 0 && (
+                  <div className="flex justify-between items-center text-emerald-400">
+                    <span>Cobros de Cuentas Corrientes:</span>
+                    <span className="font-mono font-bold">+${Number(selectedCierreDetail.ingresos).toLocaleString('es-AR')}</span>
+                  </div>
+                )}
+                {Number(selectedCierreDetail.compras_efectivo || 0) > 0 && (
+                  <div className="flex justify-between items-center text-red-400">
+                    <span>Compras Pagadas en Efectivo:</span>
+                    <span className="font-mono font-bold">-${Number(selectedCierreDetail.compras_efectivo).toLocaleString('es-AR')}</span>
+                  </div>
+                )}
+                {Number(selectedCierreDetail.salidas || 0) > 0 && (
+                  <div className="flex justify-between items-center text-red-400">
+                    <span>Salidas de Caja (Gastos/Retiros):</span>
+                    <span className="font-mono font-bold">-${Number(selectedCierreDetail.salidas).toLocaleString('es-AR')}</span>
+                  </div>
+                )}
+                
+                <div className="pt-2 mt-2 border-t border-white/10 flex justify-between items-center font-bold text-sm">
+                  <span className="text-zinc-200">Efectivo Esperado:</span>
+                  <span className="font-mono text-zinc-100">${Number(selectedCierreDetail.efectivo_esperado || 0).toLocaleString('es-AR')}</span>
+                </div>
+                <div className="flex justify-between items-center font-bold text-sm">
+                  <span className="text-zinc-200">Efectivo Real en Mano:</span>
+                  <span className="font-mono text-emerald-400">${Number(selectedCierreDetail.efectivo_real || 0).toLocaleString('es-AR')}</span>
+                </div>
+                <div className="flex justify-between items-center font-bold text-sm pt-1">
+                  <span className="text-zinc-400">Diferencia:</span>
+                  <span className={`font-mono px-2 py-0.5 rounded-md ${
+                    Number(selectedCierreDetail.diferencia) === 0 ? 'text-emerald-400 bg-emerald-500/10' :
+                    Number(selectedCierreDetail.diferencia) > 0 ? 'text-blue-400 bg-blue-500/10' :
+                    'text-red-400 bg-red-500/10'
+                  }`}>
+                    {Number(selectedCierreDetail.diferencia) === 0 ? '$0 (Exacto)' :
+                     Number(selectedCierreDetail.diferencia) > 0 ? `+$${Number(selectedCierreDetail.diferencia).toLocaleString('es-AR')} (Sobrante)` :
+                     `-$${Math.abs(Number(selectedCierreDetail.diferencia)).toLocaleString('es-AR')} (Faltante)`}
+                  </span>
+                </div>
+              </div>
+
+              {/* Otros Medios de Pago en Mostrador */}
+              <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-2 text-xs">
+                <p className="font-bold text-sm text-white mb-2 pb-1 border-b border-white/5">Otros Medios de Pago (Mostrador)</p>
+                <div className="flex justify-between items-center text-zinc-300">
+                  <span>Transferencias:</span>
+                  <span className="font-mono font-bold text-blue-400">${Number(selectedCierreDetail.ventas_panaderia_transferencia || 0).toLocaleString('es-AR')}</span>
+                </div>
+                <div className="flex justify-between items-center text-zinc-300">
+                  <span>Tarjetas (Débito/Crédito):</span>
+                  <span className="font-mono font-bold text-purple-400">${Number(selectedCierreDetail.ventas_panaderia_tarjeta || 0).toLocaleString('es-AR')}</span>
+                </div>
+                <div className="pt-2 mt-2 border-t border-white/10 flex justify-between items-center font-bold">
+                  <span className="text-zinc-300">Total Facturado Mostrador:</span>
+                  <span className="font-mono text-brand-yellow text-sm">${Number(selectedCierreDetail.ventas_panaderia_total || 0).toLocaleString('es-AR')}</span>
+                </div>
+              </div>
+
+              {/* Observaciones */}
+              {selectedCierreDetail.observaciones && (
+                <div className="bg-black/20 p-3 rounded-2xl text-xs">
+                  <span className="text-zinc-500 block text-[10px] uppercase font-bold">Observaciones del Cajero</span>
+                  <p className="text-zinc-300 mt-1 italic">"{selectedCierreDetail.observaciones}"</p>
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 border-t border-white/10 bg-black/20">
+              <button onClick={() => setSelectedCierreDetail(null)} className="w-full py-3 bg-white/5 hover:bg-white/10 text-white rounded-xl font-bold text-sm transition-colors">
+                Cerrar Detalle
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
+
+
+
+
+
+
