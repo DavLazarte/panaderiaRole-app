@@ -21,7 +21,10 @@ export default function UsuariosCrud({ token, apiUrl }: UsuariosCrudProps) {
     setLoading(true);
     try {
       const res = await fetch(`${apiUrl}/admin/users`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { 
+          'Accept': 'application/json',
+          Authorization: `Bearer ${token}` 
+        }
       });
       if (res.ok) {
         const data = await res.json();
@@ -56,16 +59,21 @@ export default function UsuariosCrud({ token, apiUrl }: UsuariosCrudProps) {
     try {
       const res = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 
+          'Content-Type': 'application/json', 
+          'Accept': 'application/json',
+          Authorization: `Bearer ${token}` 
+        },
         body: JSON.stringify(body)
       });
-      if (res.ok) {
+      const data = await res.json();
+      if (res.ok && data.success) {
         setModalOpen(false);
         setEditingUser(null);
         fetchUsers();
       } else {
-        const data = await res.json();
-        alert(data.message || 'Error al guardar');
+        const errorMsg = data.errors ? Object.values(data.errors).flat().join('\n') : (data.message || 'Error al guardar');
+        alert(errorMsg);
       }
     } catch (e) {
       alert('Error de red');
@@ -75,23 +83,29 @@ export default function UsuariosCrud({ token, apiUrl }: UsuariosCrudProps) {
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     const fd = new FormData(e.target as HTMLFormElement);
-    const password = fd.get('password');
+    const password = fd.get('password') as string;
     if (!password) return;
 
     try {
       const res = await fetch(`${apiUrl}/admin/users/${resetPasswordOpen.id}/reset-password`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 
+          'Content-Type': 'application/json', 
+          'Accept': 'application/json',
+          Authorization: `Bearer ${token}` 
+        },
         body: JSON.stringify({ password })
       });
-      if (res.ok) {
+      const data = await res.json();
+      if (res.ok && data.success) {
         alert('Contraseña actualizada correctamente');
         setResetPasswordOpen(null);
       } else {
-        alert('Error al resetear contraseña');
+        const errorMsg = data.errors ? Object.values(data.errors).flat().join('\n') : (data.message || 'Error al resetear contraseña');
+        alert(errorMsg);
       }
     } catch (e) {
-      alert('Error de red');
+      alert('Error de red al actualizar contraseña');
     }
   };
 
@@ -205,7 +219,7 @@ export default function UsuariosCrud({ token, apiUrl }: UsuariosCrudProps) {
               {!editingUser && (
                 <div>
                   <label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">Contraseña Inicial</label>
-                  <input name="password" type="password" required minLength={6}
+                  <input name="password" type="password" required minLength={4}
                     className="w-full h-11 bg-white/5 border border-white/10 rounded-xl px-4 text-sm text-white outline-none focus:border-brand-red" />
                 </div>
               )}
@@ -244,7 +258,7 @@ export default function UsuariosCrud({ token, apiUrl }: UsuariosCrudProps) {
             <form onSubmit={handleResetPassword} className="p-6 space-y-4">
               <p className="text-sm text-zinc-400">Ingrese la nueva contraseña para <b>{resetPasswordOpen.name}</b>.</p>
               <div>
-                <input name="password" type="text" required minLength={6} placeholder="Nueva contraseña..."
+                <input name="password" type="text" required minLength={4} placeholder="Nueva contraseña (mínimo 4 caracteres)..."
                   className="w-full h-11 bg-white/5 border border-white/10 rounded-xl px-4 text-sm text-white outline-none focus:border-brand-red" />
               </div>
               <button type="submit" className="w-full py-3 rounded-xl bg-brand-yellow text-black text-sm font-bold hover:bg-yellow-400 transition-colors">Actualizar</button>
