@@ -77,7 +77,7 @@ const parsePaymentInput = (formatted: string): number => {
 
 interface Product  { id: number; name: string; price: number; quantity: number; sold_qty?: number; reserved_qty?: number; stock_local?: number; stock_repartidores?: { [id: string]: { cantidad: number, cantidad_reservada: number } }; descripcion?: string; codigo?: string; estado?: string; idcategoria?: number; precio_unitario?: number; precio_reparto?: number; precio_bar?: number; disponible_reparto?: number; precios_especiales?: any[]; unidad_medida?: string; }
 interface Client   { id: number; name: string; address: string; balance: number; }
-interface Delivery { id: number; customer: string; status: string; items: string; raw_items?: {id?: number, name: string, qty: number}[]; total: string; total_raw: number; address: string; advance?: number; fecha_entrega?: string | null; }
+interface Delivery { id: number; customer: string; status: string; estado?: string; estado_pedido?: string; fecha_venta?: string | null; pago?: number; saldo?: number; forma_de_pago?: string; items: string; raw_items?: {id?: number, name: string, qty: number}[]; total: string; total_raw: number; address: string; advance?: number; fecha_entrega?: string | null; idcliente?: number; telefono?: string; notas?: string; creador?: { id: number | null; nombre: string; email?: string | null; rol: string; tipo_origen: string; etiqueta_origen: string; }; }
 interface SaleItem { id: number; name: string; price: number; quantity: number; }
 interface Categoria { id_categoria: number; nombre: string; descripcion?: string; estado?: string; articulos_count?: number; }
 
@@ -1743,6 +1743,9 @@ export default function BakeryDriverApp() {
   const isVendedor = user?.roles?.some((r: string) => r.toLowerCase() === 'vendedor');
   const isVehiculo1 = user?.roles?.some((r: string) => r.toLowerCase() === 'vehiculo1');
   const isVehiculo2 = user?.roles?.some((r: string) => r.toLowerCase() === 'vehiculo2');
+  const isClienteMayorista = user?.roles?.some((r: string) => 
+    ['cliente_mayorista', 'cliente mayorista', 'cliente'].includes(r.toLowerCase())
+  );
 
   const [activeTab, setActiveTab]           = useState("pos");
   const [deliveryFilter, setDeliveryFilter] = useState("All");
@@ -1750,16 +1753,34 @@ export default function BakeryDriverApp() {
   const [cart, setCart]     = useState<Record<number, number>>({});
   const [products, setProducts]   = useState<Product[]>([]);
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
+  const [entregados, setEntregados] = useState<Delivery[]>([]);
+  const [pedidosSubTab, setPedidosSubTab] = useState<'pendientes' | 'entregados'>('pendientes');
+  const [loadingEntregados, setLoadingEntregados] = useState(false);
   const [clients, setClients]     = useState<Client[]>([]);
   const [misVentas, setMisVentas] = useState<any[]>([]);
   const [loading, setLoading]     = useState(true);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
 
+  // Estados específicos para Cliente Mayorista
+  const [mayoristaFechaEntrega, setMayoristaFechaEntrega] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
+  const [mayoristaNotas, setMayoristaNotas] = useState('');
+  const [loadingMayoristaPedido, setLoadingMayoristaPedido] = useState(false);
+  const [mayoristaVentas, setMayoristaVentas] = useState<any[]>([]);
+  const [loadingMayoristaCuenta, setLoadingMayoristaCuenta] = useState(false);
+  const [mayoristaSearchProd, setMayoristaSearchProd] = useState('');
+
   React.useEffect(() => {
     if (user && isProduccion && activeTab === 'pos') {
       setActiveTab('deposito');
     }
-  }, [user, isProduccion, activeTab]);
+    if (user && isClienteMayorista && (activeTab === 'pos' || activeTab === 'stock' || activeTab === 'clientes' || activeTab === 'ventas')) {
+      setActiveTab('cargar_pedido');
+    }
+  }, [user, isProduccion, isClienteMayorista, activeTab]);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [categoriasModalOpen, setCategoriasModalOpen] = useState(false);
 
@@ -2442,14 +2463,16 @@ export default function BakeryDriverApp() {
     if (full) setLoading(true);
     const headers = { Authorization: `Bearer ${authToken}` };
     try {
-      const [stockRes, pedRes, cliRes] = await Promise.all([
+      const [stockRes, pedRes, cliRes, entRes] = await Promise.all([
         fetch(`${API_URL}/stock`, { headers }),
-        fetch(`${API_URL}/pedidos`, { headers }),
+        fetch(`${API_URL}/pedidos?filtro_estado=pendientes`, { headers }),
         fetch(`${API_URL}/clientes`, { headers }),
+        fetch(`${API_URL}/pedidos?filtro_estado=entregados`, { headers }),
       ]);
       if (stockRes.ok) setProducts(await stockRes.json());
       if (pedRes.ok)   setDeliveries(await pedRes.json());
       if (cliRes.ok)   setClients(await cliRes.json());
+      if (entRes.ok)   setEntregados(await entRes.json());
       
       if (full) {
         const usrRes = await fetch(`${API_URL}/user`, { headers });
@@ -2631,7 +2654,8 @@ export default function BakeryDriverApp() {
 
   const updateQuantity = (product: Product, change: number) => {
     setCart(prev => {
-      const next = Math.max(0, Math.min(product.quantity, (prev[product.id] || 0) + change));
+      const maxLimit = isClienteMayorista ? 99999 : product.quantity;
+      const next = Math.max(0, Math.min(maxLimit, (prev[product.id] || 0) + change));
       return { ...prev, [product.id]: next };
     });
   };
@@ -2643,7 +2667,8 @@ export default function BakeryDriverApp() {
     }
     const parsed = parseInt(value, 10);
     if (isNaN(parsed)) return;
-    const clamped = Math.max(0, Math.min(product.quantity, parsed));
+    const maxLimit = isClienteMayorista ? 99999 : product.quantity;
+    const clamped = Math.max(0, Math.min(maxLimit, parsed));
     setCart(prev => ({ ...prev, [product.id]: clamped }));
   };
 
@@ -2735,8 +2760,277 @@ export default function BakeryDriverApp() {
     } finally { setLoadingActionId(null); }
   };
 
+  // ── Handlers Cliente Mayorista ──
+  const handleCrearPedidoMayorista = async () => {
+    const selectedItems = Object.entries(cart)
+      .filter(([_, qty]) => qty > 0)
+      .map(([id, quantity]) => {
+        const prod = products.find(p => p.id === Number(id));
+        return {
+          id: Number(id),
+          quantity,
+          price: prod?.price || 0,
+        };
+      });
+
+    if (selectedItems.length === 0) {
+      alert("Por favor selecciona al menos un producto para el pedido.");
+      return;
+    }
+
+    if (!mayoristaFechaEntrega) {
+      alert("Por favor selecciona una fecha estimada de entrega.");
+      return;
+    }
+
+    const total = selectedItems.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+    setLoadingMayoristaPedido(true);
+
+    try {
+      const res = await fetch(`${API_URL}/ventas`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          cart: selectedItems,
+          total: total,
+          es_pedido: true,
+          fecha_entrega: mayoristaFechaEntrega,
+          notas: mayoristaNotas.trim() || undefined,
+          idcliente: user?.persona_id || user?.persona?.id || undefined,
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert("¡Pedido registrado con éxito! Tu pedido ha sido enviado a producción y reparto.");
+        setCart({});
+        setMayoristaNotas("");
+        setActiveTab("pedidos");
+        fetchAllData(token!, false);
+      } else {
+        alert(data.message || "Error al registrar el pedido");
+      }
+    } catch {
+      alert("Error de conexión al registrar el pedido");
+    } finally {
+      setLoadingMayoristaPedido(false);
+    }
+  };
+
+  const handleDownloadPdfMayorista = async () => {
+    const clientId = user?.persona_id || user?.persona?.id;
+    if (!clientId) {
+      alert("No se encontró el cliente asociado a tu usuario.");
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/clientes/${clientId}/resumen-pdf`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `Estado_Cuenta_${(user.name || 'Cliente').replace(/\s+/g, '_')}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(data.message || "No hay movimientos con saldo pendiente para descargar.");
+      }
+    } catch {
+      alert("Error al descargar el resumen de cuenta");
+    }
+  };
+
+  useEffect(() => {
+    if (!token || !isClienteMayorista || activeTab !== "cuenta") return;
+    const clientId = user?.persona_id || user?.persona?.id;
+    if (!clientId) return;
+
+    const fetchCuenta = async () => {
+      setLoadingMayoristaCuenta(true);
+      try {
+        const res = await fetch(`${API_URL}/clientes/${clientId}/ventas`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setMayoristaVentas(data);
+        }
+      } catch (e) {
+        console.error("Error al cargar estado de cuenta mayorista", e);
+      } finally {
+        setLoadingMayoristaCuenta(false);
+      }
+    };
+
+    fetchCuenta();
+  }, [token, isClienteMayorista, activeTab, user]);
+
   const filteredClients    = clients.filter(c => c.name.toLowerCase().includes(search.toLowerCase()));
-  const filteredDeliveries = deliveries.filter(d => deliveryFilter === "All" ? true : d.status === deliveryFilter);
+
+  // ── Pedidos: búsqueda y agrupación por cliente ──
+  const [pedidosSearch, setPedidosSearch] = useState("");
+  const [pedidosViewMode, setPedidosViewMode] = useState<'clientes' | 'lista'>('clientes');
+  const [pedidosOrigenFilter, setPedidosOrigenFilter] = useState<string>("All");
+  const [collapsedClients, setCollapsedClients] = useState<Record<string, boolean>>({});
+
+  const toggleClientCollapse = (key: string) => {
+    setCollapsedClients(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
+
+  const collapseAllClients = (keys: string[]) => {
+    setCollapsedClients(prev => {
+      const next = { ...prev };
+      keys.forEach(k => { next[k] = true; });
+      return next;
+    });
+  };
+
+  const expandAllClients = (keys: string[]) => {
+    setCollapsedClients(prev => {
+      const next = { ...prev };
+      keys.forEach(k => { next[k] = false; });
+      return next;
+    });
+  };
+
+  const filteredDeliveries = useMemo(() => {
+    return deliveries.filter(d => {
+      const isInactive = d.estado && ['inactivo', 'cancelado', 'anulado', 'eliminado'].includes(d.estado.toLowerCase());
+      if (isInactive) return false;
+      const matchesStatus = deliveryFilter === "All" ? true : d.status === deliveryFilter;
+      const matchesOrigen = pedidosOrigenFilter === "All" || d.creador?.tipo_origen === pedidosOrigenFilter;
+      const s = pedidosSearch.toLowerCase().trim();
+      const matchesSearch = !s ||
+        (d.customer && d.customer.toLowerCase().includes(s)) ||
+        (d.address && d.address.toLowerCase().includes(s)) ||
+        (d.items && d.items.toLowerCase().includes(s)) ||
+        (d.notas && d.notas.toLowerCase().includes(s)) ||
+        (d.creador?.nombre && d.creador.nombre.toLowerCase().includes(s)) ||
+        (d.creador?.etiqueta_origen && d.creador.etiqueta_origen.toLowerCase().includes(s));
+      return matchesStatus && matchesOrigen && matchesSearch;
+    });
+  }, [deliveries, deliveryFilter, pedidosOrigenFilter, pedidosSearch]);
+
+  const groupedDeliveriesByClient = useMemo(() => {
+    const groups: {
+      clientKey: string;
+      customer: string;
+      address: string;
+      telefono?: string;
+      idcliente?: number;
+      orders: Delivery[];
+      totalAmount: number;
+    }[] = [];
+
+    const map = new Map<string, typeof groups[0]>();
+
+    filteredDeliveries.forEach(d => {
+      const key = d.customer || "Consumidor Final";
+      if (!map.has(key)) {
+        const groupObj = {
+          clientKey: key,
+          customer: d.customer,
+          address: d.address || "Sin dirección",
+          telefono: d.telefono || "",
+          idcliente: d.idcliente,
+          orders: [],
+          totalAmount: 0,
+        };
+        map.set(key, groupObj);
+        groups.push(groupObj);
+      }
+      const g = map.get(key)!;
+      g.orders.push(d);
+      const val = d.total_raw || parseFloat(String(d.total).replace(/[^0-9.-]+/g, "")) || 0;
+      g.totalAmount += val;
+    });
+
+    return groups;
+  }, [filteredDeliveries]);
+
+  const fetchEntregados = useCallback(async (authToken?: string) => {
+    const tk = authToken || token;
+    if (!tk) return;
+    setLoadingEntregados(true);
+    try {
+      const res = await fetch(`${API_URL}/pedidos?filtro_estado=entregados`, {
+        headers: { Authorization: `Bearer ${tk}` }
+      });
+      if (res.ok) {
+        setEntregados(await res.json());
+      }
+    } catch (e) {
+      console.error("Error al cargar entregados", e);
+    } finally {
+      setLoadingEntregados(false);
+    }
+  }, [token]);
+
+  const filteredEntregados = useMemo(() => {
+    return entregados.filter(d => {
+      const isInactive = d.estado && ['inactivo', 'cancelado', 'anulado', 'eliminado'].includes(d.estado.toLowerCase());
+      if (isInactive) return false;
+      const matchesOrigen = pedidosOrigenFilter === "All" || d.creador?.tipo_origen === pedidosOrigenFilter;
+      const s = pedidosSearch.toLowerCase().trim();
+      const matchesSearch = !s ||
+        (d.customer && d.customer.toLowerCase().includes(s)) ||
+        (d.address && d.address.toLowerCase().includes(s)) ||
+        (d.items && d.items.toLowerCase().includes(s)) ||
+        (d.notas && d.notas.toLowerCase().includes(s)) ||
+        (d.creador?.nombre && d.creador.nombre.toLowerCase().includes(s)) ||
+        (d.creador?.etiqueta_origen && d.creador.etiqueta_origen.toLowerCase().includes(s));
+      return matchesOrigen && matchesSearch;
+    });
+  }, [entregados, pedidosOrigenFilter, pedidosSearch]);
+
+  const groupedEntregadosByClient = useMemo(() => {
+    const groups: {
+      clientKey: string;
+      customer: string;
+      address: string;
+      telefono?: string;
+      idcliente?: number;
+      orders: Delivery[];
+      totalAmount: number;
+    }[] = [];
+
+    const map = new Map<string, typeof groups[0]>();
+
+    filteredEntregados.forEach(d => {
+      const key = d.customer || "Consumidor Final";
+      if (!map.has(key)) {
+        const groupObj = {
+          clientKey: key,
+          customer: d.customer,
+          address: d.address || "Sin dirección",
+          telefono: d.telefono || "",
+          idcliente: d.idcliente,
+          orders: [],
+          totalAmount: 0,
+        };
+        map.set(key, groupObj);
+        groups.push(groupObj);
+      }
+      const g = map.get(key)!;
+      g.orders.push(d);
+      const val = d.total_raw || parseFloat(String(d.total).replace(/[^0-9.-]+/g, "")) || 0;
+      g.totalAmount += val;
+    });
+
+    return groups;
+  }, [filteredEntregados]);
 
   const NavButton = ({ icon: Icon, label, value, prominent, badge }: any) => (
     <button onClick={() => setActiveTab(value)}
@@ -2758,9 +3052,42 @@ export default function BakeryDriverApp() {
       Today: "bg-blue-500/20 text-blue-300 border-blue-500/30",
       Late:  "bg-red-500/20 text-red-300 border-red-500/30",
       Pending: "bg-brand-red/20 text-brand-yellow border-brand-red/30",
+      Delivered: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
     };
-    const labels: Record<string, string> = { Today: "Hoy", Late: "Atrasado", Pending: "Pendiente" };
+    const labels: Record<string, string> = { Today: "Hoy", Late: "Atrasado", Pending: "Pendiente", Delivered: "Entregado" };
     return <div className={`rounded-full border px-3 py-1 text-xs font-semibold ${styles[status] || styles.Pending}`}>{labels[status] || status}</div>;
+  };
+
+  const CreadorBadge = ({ creador }: { creador?: Delivery['creador'] }) => {
+    if (!creador) return null;
+    const origen = creador.tipo_origen;
+    
+    if (origen === 'mayorista') {
+      return (
+        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 shrink-0" title={`Cargado por: ${creador.nombre} (${creador.rol})`}>
+          🛒 {creador.nombre} · Mayorista
+        </span>
+      );
+    }
+    if (origen === 'pos_local') {
+      return (
+        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shrink-0" title={`Cargado por: ${creador.nombre} (${creador.rol})`}>
+          🏪 {creador.nombre} · POS Panadería
+        </span>
+      );
+    }
+    if (origen === 'preventista') {
+      return (
+        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0" title={`Cargado por: ${creador.nombre} (${creador.rol})`}>
+          🛵 {creador.nombre} · Preventista
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0" title={`Cargado por: ${creador.nombre} (${creador.rol})`}>
+        ⚡ {creador.nombre} · Admin
+      </span>
+    );
   };
 
   // ── LOGIN ──
@@ -2806,48 +3133,65 @@ export default function BakeryDriverApp() {
             </div>
           </div>
           <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
-            {!isProduccion && (
+            {isClienteMayorista ? (
               <>
-                <button onClick={() => setActiveTab('pedidos')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'pedidos' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
-                  <Truck className="w-5 h-5"/> <span className="font-semibold text-sm">Pedidos</span>
-                  {deliveries.filter(d => d.status === "Late").length > 0 && <span className="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">{deliveries.filter(d => d.status === "Late").length}</span>}
+                <button onClick={() => setActiveTab('cargar_pedido')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'cargar_pedido' ? 'bg-brand-red/20 text-brand-yellow font-bold' : 'hover:bg-white/5 text-zinc-400 font-semibold'} text-sm`}>
+                  <ShoppingCart className="w-5 h-5"/> <span>Cargar Pedido</span>
                 </button>
-                {!isVendedor && (
-                  <button onClick={() => setActiveTab('stock')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'stock' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Package className="w-5 h-5"/> <span className="font-semibold text-sm">Stock</span></button>
-                )}
-                <button onClick={() => setActiveTab('pos')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'pos' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><ShoppingCart className="w-5 h-5"/> <span className="font-semibold text-sm">Venta Rápida</span></button>
-                {!isVendedor && (
-                  <button onClick={() => setActiveTab('clientes')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'clientes' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Users className="w-5 h-5"/> <span className="font-semibold text-sm">Clientes</span></button>
-                )}
-                <button onClick={() => setActiveTab('ventas')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'ventas' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Receipt className="w-5 h-5"/> <span className="font-semibold text-sm">Historial</span></button>
+                <button onClick={() => setActiveTab('pedidos')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'pedidos' ? 'bg-brand-red/20 text-brand-yellow font-bold' : 'hover:bg-white/5 text-zinc-400 font-semibold'} text-sm`}>
+                  <Truck className="w-5 h-5"/> <span>Mis Pedidos</span>
+                  {deliveries.length > 0 && <span className="ml-auto bg-brand-red text-white text-xs px-2 py-0.5 rounded-full font-bold">{deliveries.length}</span>}
+                </button>
+                <button onClick={() => setActiveTab('cuenta')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'cuenta' ? 'bg-brand-red/20 text-brand-yellow font-bold' : 'hover:bg-white/5 text-zinc-400 font-semibold'} text-sm`}>
+                  <Receipt className="w-5 h-5"/> <span>Estado de Cuenta</span>
+                </button>
               </>
-            )}
-            
-            {(isAdmin || isProduccion) && (
-              <button onClick={() => { setActiveTab('deposito'); fetchDeposito(); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'deposito' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
-                <Warehouse className="w-5 h-5"/> <span className="font-semibold text-sm">Depósito</span>
-                {depositoReservasPendientes.length > 0 && <span className="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">{depositoReservasPendientes.length}</span>}
-              </button>
-            )}
-            {isAdmin && (
-              <button onClick={() => { setActiveTab('materias'); fetchMateriaPrimas(mpPage, mpSearch); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'materias' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
-                <ClipboardList className="w-5 h-5"/> <span className="font-semibold text-sm">Materias Primas</span>
-              </button>
-            )}
-            {(isAdmin || isProduccion) && (
-              <button onClick={() => { setActiveTab('recetas'); fetchRecetas(recetaSearch); fetchMateriaPrimas(1, ''); fetchDeposito(); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'recetas' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
-                <CheckCircle2 className="w-5 h-5"/> <span className="font-semibold text-sm">Recetas</span>
-              </button>
-            )}
-            {isAdmin && (
-              <button onClick={() => { setActiveTab('despacho'); fetchDeposito(); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'despacho' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
-                <Truck className="w-5 h-5"/> <span className="font-semibold text-sm">Despacho</span>
-              </button>
-            )}
-            {isAdmin && (
-              <button onClick={() => setActiveTab('usuarios')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'usuarios' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
-                <UserIcon className="w-5 h-5"/> <span className="font-semibold text-sm">Usuarios</span>
-              </button>
+            ) : (
+              <>
+                {!isProduccion && (
+                  <>
+                    <button onClick={() => setActiveTab('pedidos')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'pedidos' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
+                      <Truck className="w-5 h-5"/> <span className="font-semibold text-sm">Pedidos</span>
+                      {deliveries.filter(d => d.status === "Late").length > 0 && <span className="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">{deliveries.filter(d => d.status === "Late").length}</span>}
+                    </button>
+                    {!isVendedor && (
+                      <button onClick={() => setActiveTab('stock')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'stock' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Package className="w-5 h-5"/> <span className="font-semibold text-sm">Stock</span></button>
+                    )}
+                    <button onClick={() => setActiveTab('pos')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'pos' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><ShoppingCart className="w-5 h-5"/> <span className="font-semibold text-sm">Venta Rápida</span></button>
+                    {!isVendedor && (
+                      <button onClick={() => setActiveTab('clientes')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'clientes' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Users className="w-5 h-5"/> <span className="font-semibold text-sm">Clientes</span></button>
+                    )}
+                    <button onClick={() => setActiveTab('ventas')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'ventas' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Receipt className="w-5 h-5"/> <span className="font-semibold text-sm">Historial</span></button>
+                  </>
+                )}
+                
+                {(isAdmin || isProduccion) && (
+                  <button onClick={() => { setActiveTab('deposito'); fetchDeposito(); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'deposito' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
+                    <Warehouse className="w-5 h-5"/> <span className="font-semibold text-sm">Depósito</span>
+                    {depositoReservasPendientes.length > 0 && <span className="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">{depositoReservasPendientes.length}</span>}
+                  </button>
+                )}
+                {isAdmin && (
+                  <button onClick={() => { setActiveTab('materias'); fetchMateriaPrimas(mpPage, mpSearch); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'materias' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
+                    <ClipboardList className="w-5 h-5"/> <span className="font-semibold text-sm">Materias Primas</span>
+                  </button>
+                )}
+                {(isAdmin || isProduccion) && (
+                  <button onClick={() => { setActiveTab('recetas'); fetchRecetas(recetaSearch); fetchMateriaPrimas(1, ''); fetchDeposito(); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'recetas' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
+                    <CheckCircle2 className="w-5 h-5"/> <span className="font-semibold text-sm">Recetas</span>
+                  </button>
+                )}
+                {isAdmin && (
+                  <button onClick={() => { setActiveTab('despacho'); fetchDeposito(); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'despacho' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
+                    <Truck className="w-5 h-5"/> <span className="font-semibold text-sm">Despacho</span>
+                  </button>
+                )}
+                {isAdmin && (
+                  <button onClick={() => setActiveTab('usuarios')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'usuarios' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
+                    <UserIcon className="w-5 h-5"/> <span className="font-semibold text-sm">Usuarios</span>
+                  </button>
+                )}
+              </>
             )}
           </nav>
           <div className="p-4 border-t border-white/10">
@@ -2864,7 +3208,7 @@ export default function BakeryDriverApp() {
             </div>
             <div>
               <p className="text-sm font-bold leading-tight">{user.name}</p>
-              <p className="text-xs text-zinc-500">Van #{user.vehiculo} · {user.roles[0]}</p>
+              <p className="text-xs text-zinc-500">{isClienteMayorista ? "Cliente Mayorista" : `Van #${user.vehiculo} · ${user.roles[0]}`}</p>
             </div>
           </div>
           <button onClick={logout} className="p-2 bg-white/5 rounded-full border border-white/10">
@@ -2874,8 +3218,246 @@ export default function BakeryDriverApp() {
 
         <main className="flex-1 overflow-y-auto px-4 pb-40 pt-3 relative z-10">
 
+          {/* ── CLIENTE MAYORISTA: CARGAR PEDIDO ── */}
+          {isClienteMayorista && activeTab === "cargar_pedido" && (
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h1 className="text-2xl font-bold flex items-center gap-2">
+                    <ShoppingCart className="w-6 h-6 text-brand-red" /> Realizar Pedido
+                  </h1>
+                  <p className="text-xs text-zinc-400 mt-1">
+                    Selecciona los productos y cantidades deseadas para tu entrega.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 shrink-0 self-start sm:self-auto">
+                  <UserIcon className="h-4 w-4 text-brand-yellow" />
+                  <span className="text-xs font-semibold text-brand-yellow">{user.name}</span>
+                </div>
+              </div>
+
+              {/* Parámetros del Pedido: Fecha y Notas */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-4 rounded-3xl border border-white/10 bg-black/40 backdrop-blur-md">
+                <div>
+                  <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider block mb-1.5">
+                    Fecha deseada de Entrega
+                  </label>
+                  <input
+                    type="date"
+                    value={mayoristaFechaEntrega}
+                    onChange={e => setMayoristaFechaEntrega(e.target.value)}
+                    min={new Date().toISOString().split('T')[0]}
+                    className="w-full h-11 px-4 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:border-brand-red outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider block mb-1.5">
+                    Notas o Aclaraciones (Opcional)
+                  </label>
+                  <input
+                    type="text"
+                    value={mayoristaNotas}
+                    onChange={e => setMayoristaNotas(e.target.value)}
+                    placeholder="Ej: Entregar por la mañana, timbre 2, etc..."
+                    className="w-full h-11 px-4 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:border-brand-red outline-none placeholder:text-zinc-500"
+                  />
+                </div>
+              </div>
+
+              {/* Buscador de Productos */}
+              <div className="relative">
+                <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                <input
+                  value={mayoristaSearchProd}
+                  onChange={e => setMayoristaSearchProd(e.target.value)}
+                  placeholder="Buscar producto en el catálogo..."
+                  className="h-11 w-full rounded-2xl border border-white/10 bg-white/5 pl-11 pr-4 text-sm outline-none placeholder:text-zinc-500 focus:border-brand-red text-white"
+                />
+                {mayoristaSearchProd && (
+                  <button onClick={() => setMayoristaSearchProd("")} className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-zinc-400 hover:text-white">
+                    Limpiar
+                  </button>
+                )}
+              </div>
+
+              {/* Catálogo de Productos */}
+              {loading ? (
+                <div className="space-y-2">{[1,2,3,4].map(i => <div key={i} className="h-16 rounded-2xl bg-white/5 animate-pulse" />)}</div>
+              ) : products.filter(p => p.name.toLowerCase().includes(mayoristaSearchProd.toLowerCase())).length === 0 ? (
+                <div className="text-center py-12 border border-dashed border-white/10 rounded-3xl p-6">
+                  <Package className="w-10 h-10 text-zinc-600 mx-auto mb-2" />
+                  <p className="text-zinc-400 text-sm">No se encontraron productos disponibles.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  {products
+                    .filter(p => p.name.toLowerCase().includes(mayoristaSearchProd.toLowerCase()))
+                    .map(product => {
+                      const qty = cart[product.id] || 0;
+                      return (
+                        <div
+                          key={product.id}
+                          className={`flex items-center justify-between gap-3 p-3 rounded-2xl border transition-all ${
+                            qty > 0 ? "border-brand-red/60 bg-brand-red/10 shadow-lg shadow-brand-red/10" : "border-white/10 bg-white/5 hover:border-white/20"
+                          }`}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold truncate text-white">{product.name}</p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-base font-bold text-brand-yellow">
+                                ${product.price}
+                              </span>
+                              {(product as any).has_special_price && (
+                                <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1.5 py-0.5 rounded font-bold">
+                                  Precio Especial
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0 bg-black/40 p-1 rounded-xl border border-white/10">
+                            <button
+                              onClick={() => updateQuantity(product, -1)}
+                              className="h-8 w-8 flex items-center justify-center rounded-lg bg-white/5 text-zinc-300 hover:bg-white/10 active:scale-95 disabled:opacity-30"
+                              disabled={qty === 0}
+                            >
+                              <Minus className="h-4 w-4" />
+                            </button>
+                            <input
+                              type="number"
+                              min={0}
+                              value={qty === 0 ? "" : qty}
+                              placeholder="0"
+                              onChange={e => handleSetQuantity(product, e.target.value)}
+                              className="w-14 h-8 text-center text-sm font-bold bg-transparent text-white outline-none"
+                            />
+                            <button
+                              onClick={() => updateQuantity(product, 1)}
+                              className="h-8 w-8 flex items-center justify-center rounded-lg bg-brand-red text-white hover:bg-brand-red/90 shadow-md shadow-brand-red/20 active:scale-95"
+                            >
+                              <Plus className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── CLIENTE MAYORISTA: ESTADO DE CUENTA ── */}
+          {isClienteMayorista && activeTab === "cuenta" && (
+            <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h1 className="text-2xl font-bold flex items-center gap-2">
+                    <Receipt className="w-6 h-6 text-brand-red" /> Estado de Cuenta
+                  </h1>
+                  <p className="text-xs text-zinc-400 mt-1">
+                    Consulta tu saldo actual, comprobantes y detalle de compras.
+                  </p>
+                </div>
+                <button
+                  onClick={handleDownloadPdfMayorista}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-500/10 border border-blue-500/30 text-blue-300 hover:bg-blue-500/20 rounded-xl font-bold text-sm transition-all active:scale-95 shadow-lg shadow-blue-500/10 self-start sm:self-auto cursor-pointer"
+                >
+                  <Download className="w-4 h-4" /> Descargar Resumen PDF
+                </button>
+              </div>
+
+              {/* Tarjeta de Saldo Principal */}
+              <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-zinc-900 via-zinc-900 to-black p-6 shadow-2xl relative overflow-hidden">
+                <div className="pointer-events-none absolute -right-10 -bottom-10 h-40 w-40 rounded-full bg-brand-red/10 blur-3xl" />
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <span className="text-xs font-bold uppercase tracking-widest text-zinc-400">
+                      Saldo Total Pendiente
+                    </span>
+                    <h2 className={`text-4xl font-extrabold mt-1 ${
+                      (user?.persona?.balance || 0) > 0 ? "text-red-400" : "text-emerald-400"
+                    }`}>
+                      ${Number(user?.persona?.balance || 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                    </h2>
+                    <p className="text-xs text-zinc-500 mt-1">
+                      {(user?.persona?.balance || 0) > 0 
+                        ? "Monto pendiente de cobro en cuenta corriente" 
+                        : "¡Tu cuenta se encuentra al día!"}
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-2xl bg-white/5 border border-white/10 text-left">
+                    <p className="text-xs text-zinc-400">Cliente</p>
+                    <p className="text-sm font-bold text-white">{user?.persona?.name || user.name}</p>
+                    {user?.persona?.address && (
+                      <p className="text-xs text-zinc-400 mt-0.5">{user.persona.address}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Historial de Compras / Facturas */}
+              <div className="space-y-3">
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-brand-yellow" /> Últimos Movimientos
+                </h3>
+
+                {loadingMayoristaCuenta ? (
+                  <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-20 rounded-2xl bg-white/5 animate-pulse" />)}</div>
+                ) : mayoristaVentas.length === 0 ? (
+                  <div className="text-center py-12 border border-dashed border-white/10 rounded-3xl p-6">
+                    <Receipt className="w-10 h-10 text-zinc-600 mx-auto mb-2" />
+                    <p className="text-zinc-400 text-sm">No se registran compras recientes con saldo.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {mayoristaVentas.map(v => (
+                      <div
+                        key={v.id}
+                        className="rounded-2xl border border-white/10 bg-white/5 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-white/20 transition-all"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold text-white">Comprobante #{v.id}</span>
+                            <span className="text-xs text-zinc-400">· {v.fecha}</span>
+                            {v.saldo === 0 ? (
+                              <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold">
+                                Saldado
+                              </span>
+                            ) : (
+                              <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full font-bold">
+                                Saldo: ${v.saldo}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-zinc-400 mt-1 line-clamp-2">{v.items}</p>
+                        </div>
+
+                        <div className="flex items-center justify-between sm:justify-end gap-6 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-white/5">
+                          <div className="text-right">
+                            <p className="text-[10px] uppercase font-bold text-zinc-500">Total</p>
+                            <p className="text-sm font-bold text-white">${v.total}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[10px] uppercase font-bold text-zinc-500">Pagado</p>
+                            <p className="text-sm font-bold text-emerald-400">${v.pago}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[10px] uppercase font-bold text-zinc-500">Pendiente</p>
+                            <p className={`text-sm font-bold ${v.saldo > 0 ? "text-red-400" : "text-zinc-500"}`}>
+                              ${v.saldo}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* ── POS ── */}
-          {activeTab === "pos" && (
+          {!isClienteMayorista && activeTab === "pos" && (
             <div className="space-y-4">
               {editingPedido && (
                 <div className="rounded-2xl border border-brand-red/30 bg-brand-red/10 p-4 flex items-center justify-between">
@@ -3006,116 +3588,871 @@ export default function BakeryDriverApp() {
           {/* ── PEDIDOS ── */}
           {activeTab === "pedidos" && (
             <div className="space-y-4">
+              {/* Header con Título, Botón de Totales y Selector de Vista */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <h1 className="text-2xl font-bold">Pedidos</h1>
-                {isAdmin && (
-                  <button onClick={() => setTotalsModalOpen(true)}
-                    className="inline-flex items-center justify-center px-4 py-2 bg-brand-red/20 text-brand-yellow border border-brand-red/30 rounded-xl font-semibold text-sm hover:bg-brand-red/30 transition-all active:scale-95">
-                    <Package className="w-4 h-4 mr-2" />
-                    Ver Totales por Producto
-                  </button>
-                )}
-              </div>
-              <div className="flex gap-2">
-                {["Today", "Late", "All"].map(f => (
-                  <button key={f} onClick={() => setDeliveryFilter(f)}
-                    className={`rounded-2xl px-4 py-2 text-sm font-medium transition-all ${deliveryFilter === f ? "bg-brand-red text-white" : "border border-white/10 bg-white/5 text-zinc-300"}`}>
-                    {f === "Today" ? "Hoy" : f === "Late" ? "Atrasados" : "Todos"}
-                  </button>
-                ))}
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {filteredDeliveries.map(delivery => (
-                  <div key={delivery.id} className="rounded-3xl border border-white/10 bg-white/5 p-4 flex flex-col justify-between">
-                    <div>
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <h3 className="text-base font-semibold">{delivery.customer}</h3>
-                          <div className="flex flex-wrap items-center gap-2 mt-1">
-                            <p className="text-xs text-zinc-400">{delivery.address}</p>
-                            {delivery.fecha_entrega && (
-                              <span className="text-[10px] font-semibold tracking-wider text-brand-yellow bg-brand-red/10 px-2 py-0.5 rounded-full border border-brand-red/20">
-                                ENTREGAR: {delivery.fecha_entrega.split('-').reverse().join('/')}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <StatusBadge status={delivery.status} />
-                      </div>
-                      <div className="mt-2 rounded-xl bg-black/20 px-3 py-2 text-xs text-zinc-300">{delivery.items}</div>
+                <div>
+                  <h1 className="text-2xl font-bold flex items-center gap-2">
+                    <Truck className="w-6 h-6 text-brand-red" /> {isClienteMayorista ? "Mis Pedidos" : "Gestión de Pedidos"}
+                  </h1>
+                  <p className="text-xs text-zinc-400 mt-1">
+                    {isClienteMayorista 
+                      ? "Consulta el estado y descarga los comprobantes de tus pedidos." 
+                      : "Control de entregas y cobranzas agrupado por cliente o lista."}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  {isAdmin && pedidosSubTab === 'pendientes' && (
+                    <button onClick={() => setTotalsModalOpen(true)}
+                      className="inline-flex items-center justify-center px-4 py-2.5 bg-brand-red/20 text-brand-yellow border border-brand-red/30 rounded-xl font-semibold text-xs hover:bg-brand-red/30 transition-all active:scale-95 shadow-md shadow-brand-red/10">
+                      <Package className="w-4 h-4 mr-2" />
+                      Totales por Producto
+                    </button>
+                  )}
+
+                  {!isClienteMayorista && (
+                    <div className="flex items-center rounded-xl bg-black/40 border border-white/10 p-1">
+                      <button
+                        onClick={() => setPedidosViewMode('clientes')}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                          pedidosViewMode === 'clientes'
+                            ? "bg-brand-red text-white shadow-md shadow-brand-red/20"
+                            : "text-zinc-400 hover:text-white"
+                        }`}
+                      >
+                        <Users className="w-3.5 h-3.5" /> Clientes
+                      </button>
+                      <button
+                        onClick={() => setPedidosViewMode('lista')}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                          pedidosViewMode === 'lista'
+                            ? "bg-brand-red text-white shadow-md shadow-brand-red/20"
+                            : "text-zinc-400 hover:text-white"
+                        }`}
+                      >
+                        <ClipboardList className="w-3.5 h-3.5" /> Lista
+                      </button>
                     </div>
-                    <div className="mt-3 flex items-center justify-between">
-                      <div>
-                        <p className="text-xs text-zinc-500">Total</p>
-                        <p className="text-lg font-bold">{delivery.total}</p>
-                      </div>
-                      <div className="flex gap-2">
-                        <button onClick={() => handleCancelarPedido(delivery)} disabled={loadingActionId === delivery.id}
-                          className="flex items-center justify-center rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2.5 hover:bg-red-500/20 active:scale-95 text-red-400 disabled:opacity-50"
-                          title="Eliminar pedido">
-                          {loadingActionId === delivery.id ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                  )}
+                </div>
+              </div>
+
+              {/* Sub-tabs: Pendientes vs Entregados */}
+              <div className="flex bg-black/40 p-1.5 rounded-2xl border border-white/10 w-full sm:w-fit self-start gap-1">
+                <button
+                  onClick={() => setPedidosSubTab('pendientes')}
+                  className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+                    pedidosSubTab === 'pendientes'
+                      ? 'bg-brand-red text-white shadow-lg shadow-brand-red/30'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  <Clock className="w-4 h-4" />
+                  <span>Pendientes</span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold ${
+                    pedidosSubTab === 'pendientes' ? 'bg-white/20 text-white' : 'bg-white/10 text-zinc-400'
+                  }`}>
+                    {deliveries.length}
+                  </span>
+                </button>
+                
+                <button
+                  onClick={() => {
+                    setPedidosSubTab('entregados');
+                    if (entregados.length === 0) fetchEntregados();
+                  }}
+                  className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+                    pedidosSubTab === 'entregados'
+                      ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Entregados</span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold ${
+                    pedidosSubTab === 'entregados' ? 'bg-white/20 text-white' : 'bg-white/10 text-zinc-400'
+                  }`}>
+                    {entregados.length}
+                  </span>
+                </button>
+              </div>
+
+              {/* ── SUB-TAB: PENDIENTES ── */}
+              {pedidosSubTab === 'pendientes' && (
+                <>
+                  {/* Barra de Filtros y Búsqueda */}
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+                    <div className="relative md:col-span-7">
+                      <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                      <input
+                        value={pedidosSearch}
+                        onChange={e => setPedidosSearch(e.target.value)}
+                        placeholder="Buscar por cliente, dirección o productos..."
+                        className="h-11 w-full rounded-2xl border border-white/10 bg-white/5 pl-11 pr-4 text-sm outline-none placeholder:text-zinc-500 focus:border-brand-red text-white"
+                      />
+                      {pedidosSearch && (
+                        <button onClick={() => setPedidosSearch("")} className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-zinc-400 hover:text-white">
+                          Limpiar
                         </button>
-                        <div className="relative group">
-                          <button disabled={loadingActionId === delivery.id}
-                            className="flex items-center justify-center rounded-xl bg-blue-500/10 border border-blue-500/20 px-3 py-2.5 hover:bg-blue-500/20 active:scale-95 text-blue-400 disabled:opacity-50"
-                            title="Descargar remito">
-                            <Download className="h-4 w-4" />
-                          </button>
-                          <div className="absolute bottom-full right-0 mb-2 hidden group-focus-within:flex flex-col bg-zinc-900 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-20 min-w-[160px]">
-                            <button
-                              onClick={async () => {
-                                try {
-                                  const res = await fetch(`${API_URL}/pedidos/${delivery.id}/comprobante?doble=false`, { headers: { Authorization: `Bearer ${token}` } });
-                                  if (res.ok) {
-                                    const blob = await res.blob();
-                                    const url = window.URL.createObjectURL(blob);
-                                    const a = document.createElement("a");
-                                    a.href = url; a.download = `Remito_${delivery.id}.pdf`;
-                                    document.body.appendChild(a); a.click(); a.remove();
-                                    window.URL.revokeObjectURL(url);
-                                  } else { alert("Error al descargar"); }
-                                } catch { alert("Error de conexión"); }
-                              }}
-                              className="px-4 py-2.5 text-sm text-left hover:bg-white/10 text-zinc-300 transition-colors">
-                              📄 Remito Simple
-                            </button>
-                            <button
-                              onClick={async () => {
-                                try {
-                                  const res = await fetch(`${API_URL}/pedidos/${delivery.id}/comprobante?doble=true`, { headers: { Authorization: `Bearer ${token}` } });
-                                  if (res.ok) {
-                                    const blob = await res.blob();
-                                    const url = window.URL.createObjectURL(blob);
-                                    const a = document.createElement("a");
-                                    a.href = url; a.download = `Remito_Doble_${delivery.id}.pdf`;
-                                    document.body.appendChild(a); a.click(); a.remove();
-                                    window.URL.revokeObjectURL(url);
-                                  } else { alert("Error al descargar"); }
-                                } catch { alert("Error de conexión"); }
-                              }}
-                              className="px-4 py-2.5 text-sm text-left hover:bg-white/10 text-zinc-300 border-t border-white/5 transition-colors">
-                              📄📄 Remito Doble
-                            </button>
-                          </div>
-                        </div>
-                        <button onClick={() => handleEditarPedido(delivery)} disabled={loadingActionId === delivery.id}
-                          className="flex items-center gap-1 rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm font-semibold hover:bg-white/10 active:scale-95 text-zinc-300 disabled:opacity-50">
-                          Editar
+                      )}
+                    </div>
+
+                    <div className="flex gap-2 md:col-span-5 overflow-x-auto pb-1 md:pb-0">
+                      {[
+                        { id: "Today", label: "Hoy", count: deliveries.filter(d => d.status === "Today").length },
+                        { id: "Late",  label: "Atrasados", count: deliveries.filter(d => d.status === "Late").length },
+                        { id: "All",   label: "Todos", count: deliveries.length },
+                      ].map(f => (
+                        <button
+                          key={f.id}
+                          onClick={() => setDeliveryFilter(f.id)}
+                          className={`flex-1 min-w-[90px] h-11 rounded-2xl px-3 text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+                            deliveryFilter === f.id
+                              ? "bg-brand-red text-white shadow-lg shadow-brand-red/20"
+                              : "border border-white/10 bg-white/5 text-zinc-400 hover:text-white"
+                          }`}
+                        >
+                          <span>{f.label}</span>
+                          <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-extrabold ${
+                            deliveryFilter === f.id ? "bg-white/20 text-white" : "bg-white/5 text-zinc-500"
+                          }`}>
+                            {f.count}
+                          </span>
                         </button>
-                        <button onClick={() => handleEntregarPedido(delivery)} disabled={loadingActionId === delivery.id}
-                          className="flex items-center gap-1 rounded-xl bg-brand-red px-4 py-2.5 text-sm font-semibold shadow-lg shadow-brand-red/20 active:scale-95 disabled:opacity-50">
-                          {loadingActionId === delivery.id ? (
-                            <><RefreshCw className="h-4 w-4 animate-spin" /> Cargando...</>
-                          ) : (
-                            <>Cobrar <ChevronRight className="h-4 w-4" /></>
-                          )}
-                        </button>
-                      </div>
+                      ))}
                     </div>
                   </div>
-                ))}
-              </div>
-              {filteredDeliveries.length === 0 && <p className="text-center text-zinc-500 mt-10 text-sm">No hay pedidos pendientes.</p>}
+
+                  {/* Filtro por Canal de Origen / Creador */}
+                  {!isClienteMayorista && (
+                    <div className="flex gap-2 overflow-x-auto pb-1 text-xs">
+                      <button
+                        onClick={() => setPedidosOrigenFilter("All")}
+                        className={`px-3 py-1.5 rounded-xl font-bold transition-all shrink-0 ${
+                          pedidosOrigenFilter === "All"
+                            ? "bg-white/20 text-white border border-white/30"
+                            : "bg-white/5 text-zinc-400 hover:text-white border border-transparent"
+                        }`}
+                      >
+                        Todos los Canales ({deliveries.length})
+                      </button>
+                      <button
+                        onClick={() => setPedidosOrigenFilter("mayorista")}
+                        className={`px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1 shrink-0 ${
+                          pedidosOrigenFilter === "mayorista"
+                            ? "bg-purple-500/30 text-purple-200 border border-purple-500/40"
+                            : "bg-white/5 text-zinc-400 hover:text-white border border-transparent"
+                        }`}
+                      >
+                        🛒 Mayoristas ({deliveries.filter(d => d.creador?.tipo_origen === 'mayorista').length})
+                      </button>
+                      <button
+                        onClick={() => setPedidosOrigenFilter("preventista")}
+                        className={`px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1 shrink-0 ${
+                          pedidosOrigenFilter === "preventista"
+                            ? "bg-emerald-500/30 text-emerald-200 border border-emerald-500/40"
+                            : "bg-white/5 text-zinc-400 hover:text-white border border-transparent"
+                        }`}
+                      >
+                        🛵 Preventistas ({deliveries.filter(d => d.creador?.tipo_origen === 'preventista').length})
+                      </button>
+                      <button
+                        onClick={() => setPedidosOrigenFilter("pos_local")}
+                        className={`px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1 shrink-0 ${
+                          pedidosOrigenFilter === "pos_local"
+                            ? "bg-cyan-500/30 text-cyan-200 border border-cyan-500/40"
+                            : "bg-white/5 text-zinc-400 hover:text-white border border-transparent"
+                        }`}
+                      >
+                        🏪 POS Panadería ({deliveries.filter(d => d.creador?.tipo_origen === 'pos_local').length})
+                      </button>
+                      <button
+                        onClick={() => setPedidosOrigenFilter("admin")}
+                        className={`px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1 shrink-0 ${
+                          pedidosOrigenFilter === "admin"
+                            ? "bg-amber-500/30 text-amber-200 border border-amber-500/40"
+                            : "bg-white/5 text-zinc-400 hover:text-white border border-transparent"
+                        }`}
+                      >
+                        ⚡ Admin ({deliveries.filter(d => d.creador?.tipo_origen === 'admin').length})
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Métricas rápidas de pedidos pendientes */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 text-xs font-semibold text-zinc-400 bg-black/20 border border-white/5 px-4 py-2.5 rounded-2xl">
+                    <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
+                      <span>📦 <b>{filteredDeliveries.length}</b> {filteredDeliveries.length === 1 ? 'pedido pendiente' : 'pedidos pendientes'}</span>
+                      {!isClienteMayorista && (
+                        <span>👥 <b>{groupedDeliveriesByClient.length}</b> {groupedDeliveriesByClient.length === 1 ? 'cliente' : 'clientes'}</span>
+                      )}
+                      {!isClienteMayorista && pedidosViewMode === 'clientes' && groupedDeliveriesByClient.length > 0 && (
+                        <div className="flex items-center gap-1.5 border-l border-white/10 pl-3">
+                          <button
+                            type="button"
+                            onClick={() => collapseAllClients(groupedDeliveriesByClient.map(g => g.clientKey))}
+                            className="px-2 py-0.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-colors"
+                          >
+                            Colapsar todos
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => expandAllClients(groupedDeliveriesByClient.map(g => g.clientKey))}
+                            className="px-2 py-0.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-colors"
+                          >
+                            Expandir todos
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <span className="text-brand-yellow font-bold text-sm">
+                      Total: ${filteredDeliveries.reduce((acc, d) => acc + (d.total_raw || parseFloat(String(d.total).replace(/[^0-9.-]+/g, "")) || 0), 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+
+                  {/* Vista Agrupada por Cliente (Acordeón) */}
+                  {(!isClienteMayorista && pedidosViewMode === 'clientes') ? (
+                    <div className="space-y-4">
+                      {groupedDeliveriesByClient.map(group => {
+                        const isCollapsed = !!collapsedClients[group.clientKey];
+                        return (
+                          <div key={group.clientKey} className="rounded-3xl border border-white/10 bg-white/5 overflow-hidden backdrop-blur-md transition-all shadow-xl hover:border-white/20">
+                            {/* Cabecera del Cliente (Click para expandir / contraer) */}
+                            <div
+                              onClick={() => toggleClientCollapse(group.clientKey)}
+                              className={`p-4 sm:p-5 bg-black/40 ${isCollapsed ? '' : 'border-b border-white/10'} flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer select-none hover:bg-white/[0.04] transition-colors`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="h-11 w-11 rounded-2xl bg-brand-red/20 border border-brand-red/30 flex items-center justify-center shrink-0">
+                                  <Users className="h-5 w-5 text-brand-yellow" />
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <h2 className="text-base sm:text-lg font-bold text-white leading-tight">{group.customer}</h2>
+                                    <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-white/10 text-zinc-300 border border-white/10">
+                                      {group.orders.length} {group.orders.length === 1 ? 'pedido' : 'pedidos'}
+                                    </span>
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400 mt-1">
+                                    {group.address && group.address !== 'Sin dirección' && (
+                                      <span className="flex items-center gap-1 text-zinc-300">
+                                        📍 {group.address}
+                                      </span>
+                                    )}
+                                    {group.telefono && (
+                                      <span className="flex items-center gap-1 text-zinc-400">
+                                        📞 {group.telefono}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-between sm:justify-end gap-4 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-white/5">
+                                <div className="text-right">
+                                  <p className="text-[10px] uppercase font-bold text-zinc-500">Total Cliente</p>
+                                  <p className="text-lg font-extrabold text-brand-yellow">
+                                    ${group.totalAmount.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                                  </p>
+                                </div>
+                                <div className={`p-2 rounded-xl bg-white/5 text-zinc-400 hover:text-white transition-all duration-200 ${isCollapsed ? '-rotate-90' : 'rotate-0'}`}>
+                                  <ChevronDown className="h-4 w-4" />
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Pedidos del Cliente */}
+                            {!isCollapsed && (
+                              <div className="p-3 sm:p-4 space-y-3 bg-black/10">
+                                {group.orders.map(delivery => (
+                                  <div key={delivery.id} className="rounded-2xl border border-white/10 bg-zinc-900/60 p-3.5 sm:p-4 flex flex-col justify-between gap-3 hover:border-brand-red/40 transition-all">
+                                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <span className="text-sm font-bold text-white">Pedido #{delivery.id}</span>
+                                          <StatusBadge status={delivery.status} />
+                                          <CreadorBadge creador={delivery.creador} />
+                                          {delivery.fecha_entrega && (
+                                            <span className="text-[10px] font-bold tracking-wider text-brand-yellow bg-brand-red/10 px-2.5 py-0.5 rounded-full border border-brand-red/20">
+                                              📅 ENTREGAR: {delivery.fecha_entrega.split('-').reverse().join('/')}
+                                            </span>
+                                          )}
+                                        </div>
+                                        {delivery.notas && (
+                                          <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-xl mt-2 inline-block">
+                                            💬 {delivery.notas}
+                                          </p>
+                                        )}
+                                        <div className="mt-2 text-xs text-zinc-300 bg-black/30 rounded-xl px-3 py-2 border border-white/5 font-mono">
+                                          {delivery.items}
+                                        </div>
+                                      </div>
+
+                                      <div className="sm:text-right shrink-0">
+                                        <p className="text-[10px] uppercase font-bold text-zinc-500">Total Pedido</p>
+                                        <p className="text-base sm:text-lg font-bold text-white">{delivery.total}</p>
+                                      </div>
+                                    </div>
+
+                                    {/* Botones de acción */}
+                                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/5">
+                                      <div className="flex items-center gap-2">
+                                        <button onClick={() => handleCancelarPedido(delivery)} disabled={loadingActionId === delivery.id}
+                                          className="flex items-center justify-center rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2 hover:bg-red-500/20 active:scale-95 text-red-400 disabled:opacity-50 text-xs font-semibold"
+                                          title="Eliminar pedido">
+                                          {loadingActionId === delivery.id ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                                          <span className="hidden sm:inline ml-1.5">Eliminar</span>
+                                        </button>
+
+                                        <div className="relative group">
+                                          <button disabled={loadingActionId === delivery.id}
+                                            className="flex items-center gap-1.5 rounded-xl bg-blue-500/10 border border-blue-500/20 px-3 py-2 hover:bg-blue-500/20 active:scale-95 text-blue-400 disabled:opacity-50 text-xs font-semibold"
+                                            title="Descargar remito">
+                                            <Download className="h-3.5 w-3.5" />
+                                            <span>Remito</span>
+                                          </button>
+                                          <div className="absolute bottom-full left-0 mb-2 hidden group-focus-within:flex flex-col bg-zinc-900 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-20 min-w-[160px]">
+                                            <button
+                                              onClick={async () => {
+                                                try {
+                                                  const res = await fetch(`${API_URL}/pedidos/${delivery.id}/comprobante?doble=false`, { headers: { Authorization: `Bearer ${token}` } });
+                                                  if (res.ok) {
+                                                    const blob = await res.blob();
+                                                    const url = window.URL.createObjectURL(blob);
+                                                    const a = document.createElement("a");
+                                                    a.href = url; a.download = `Remito_${delivery.id}.pdf`;
+                                                    document.body.appendChild(a); a.click(); a.remove();
+                                                    window.URL.revokeObjectURL(url);
+                                                  } else { alert("Error al descargar"); }
+                                                } catch { alert("Error de conexión"); }
+                                              }}
+                                              className="px-4 py-2.5 text-xs text-left hover:bg-white/10 text-zinc-300 transition-colors">
+                                              📄 Remito Simple
+                                            </button>
+                                            <button
+                                              onClick={async () => {
+                                                try {
+                                                  const res = await fetch(`${API_URL}/pedidos/${delivery.id}/comprobante?doble=true`, { headers: { Authorization: `Bearer ${token}` } });
+                                                  if (res.ok) {
+                                                    const blob = await res.blob();
+                                                    const url = window.URL.createObjectURL(blob);
+                                                    const a = document.createElement("a");
+                                                    a.href = url; a.download = `Remito_Doble_${delivery.id}.pdf`;
+                                                    document.body.appendChild(a); a.click(); a.remove();
+                                                    window.URL.revokeObjectURL(url);
+                                                  } else { alert("Error al descargar"); }
+                                                } catch { alert("Error de conexión"); }
+                                              }}
+                                              className="px-4 py-2.5 text-xs text-left hover:bg-white/10 text-zinc-300 border-t border-white/5 transition-colors">
+                                              📄📄 Remito Doble
+                                            </button>
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      <div className="flex items-center gap-2 ml-auto">
+                                        <button onClick={() => handleEditarPedido(delivery)} disabled={loadingActionId === delivery.id}
+                                          className="flex items-center gap-1 rounded-xl bg-white/5 border border-white/10 px-3 py-2 text-xs font-semibold hover:bg-white/10 active:scale-95 text-zinc-300 disabled:opacity-50">
+                                          <Edit2 className="h-3.5 w-3.5" /> Editar
+                                        </button>
+                                        <button onClick={() => handleEntregarPedido(delivery)} disabled={loadingActionId === delivery.id}
+                                          className="flex items-center gap-1 rounded-xl bg-brand-red px-3.5 py-2 text-xs font-bold text-white shadow-lg shadow-brand-red/20 active:scale-95 disabled:opacity-50">
+                                          {loadingActionId === delivery.id ? (
+                                            <><RefreshCw className="h-3.5 w-3.5 animate-spin" /> Cargando...</>
+                                          ) : (
+                                            <>Cobrar <ChevronRight className="h-3.5 w-3.5" /></>
+                                          )}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    /* Vista Lista Tradicional (o vista cliente mayorista) */
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {filteredDeliveries.map(delivery => (
+                        <div key={delivery.id} className="rounded-3xl border border-white/10 bg-white/5 p-4 flex flex-col justify-between hover:border-white/20 transition-all">
+                          <div>
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <h3 className="text-base font-semibold">{delivery.customer}</h3>
+                                  <CreadorBadge creador={delivery.creador} />
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2 mt-1">
+                                  <span className="text-xs font-bold text-zinc-300">#{delivery.id}</span>
+                                  <p className="text-xs text-zinc-400">· {delivery.address}</p>
+                                  {delivery.fecha_entrega && (
+                                    <span className="text-[10px] font-semibold tracking-wider text-brand-yellow bg-brand-red/10 px-2 py-0.5 rounded-full border border-brand-red/20">
+                                      ENTREGAR: {delivery.fecha_entrega.split('-').reverse().join('/')}
+                                    </span>
+                                  )}
+                                </div>
+                                {delivery.notas && (
+                                  <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-lg mt-1.5 inline-block">
+                                    💬 {delivery.notas}
+                                  </p>
+                                )}
+                              </div>
+                              <StatusBadge status={delivery.status} />
+                            </div>
+                            <div className="mt-2 rounded-xl bg-black/20 px-3 py-2 text-xs text-zinc-300">{delivery.items}</div>
+                          </div>
+                          <div className="mt-3 flex items-center justify-between">
+                            <div>
+                              <p className="text-xs text-zinc-500">Total</p>
+                              <p className="text-lg font-bold">{delivery.total}</p>
+                            </div>
+                            <div className="flex gap-2">
+                              <button onClick={() => handleCancelarPedido(delivery)} disabled={loadingActionId === delivery.id}
+                                className="flex items-center justify-center rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2.5 hover:bg-red-500/20 active:scale-95 text-red-400 disabled:opacity-50"
+                                title="Eliminar pedido">
+                                {loadingActionId === delivery.id ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                              </button>
+                              <div className="relative group">
+                                <button disabled={loadingActionId === delivery.id}
+                                  className="flex items-center justify-center rounded-xl bg-blue-500/10 border border-blue-500/20 px-3 py-2.5 hover:bg-blue-500/20 active:scale-95 text-blue-400 disabled:opacity-50"
+                                  title="Descargar remito">
+                                  <Download className="h-4 w-4" />
+                                </button>
+                                <div className="absolute bottom-full right-0 mb-2 hidden group-focus-within:flex flex-col bg-zinc-900 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-20 min-w-[160px]">
+                                  <button
+                                    onClick={async () => {
+                                      try {
+                                        const res = await fetch(`${API_URL}/pedidos/${delivery.id}/comprobante?doble=false`, { headers: { Authorization: `Bearer ${token}` } });
+                                        if (res.ok) {
+                                          const blob = await res.blob();
+                                          const url = window.URL.createObjectURL(blob);
+                                          const a = document.createElement("a");
+                                          a.href = url; a.download = `Remito_${delivery.id}.pdf`;
+                                          document.body.appendChild(a); a.click(); a.remove();
+                                          window.URL.revokeObjectURL(url);
+                                        } else { alert("Error al descargar"); }
+                                      } catch { alert("Error de conexión"); }
+                                    }}
+                                    className="px-4 py-2.5 text-sm text-left hover:bg-white/10 text-zinc-300 transition-colors">
+                                    📄 Remito Simple
+                                  </button>
+                                  <button
+                                    onClick={async () => {
+                                      try {
+                                        const res = await fetch(`${API_URL}/pedidos/${delivery.id}/comprobante?doble=true`, { headers: { Authorization: `Bearer ${token}` } });
+                                        if (res.ok) {
+                                          const blob = await res.blob();
+                                          const url = window.URL.createObjectURL(blob);
+                                          const a = document.createElement("a");
+                                          a.href = url; a.download = `Remito_Doble_${delivery.id}.pdf`;
+                                          document.body.appendChild(a); a.click(); a.remove();
+                                          window.URL.revokeObjectURL(url);
+                                        } else { alert("Error al descargar"); }
+                                      } catch { alert("Error de conexión"); }
+                                    }}
+                                    className="px-4 py-2.5 text-sm text-left hover:bg-white/10 text-zinc-300 border-t border-white/5 transition-colors">
+                                    📄📄 Remito Doble
+                                  </button>
+                                </div>
+                              </div>
+                              {!isClienteMayorista && (
+                                <>
+                                  <button onClick={() => handleEditarPedido(delivery)} disabled={loadingActionId === delivery.id}
+                                    className="flex items-center gap-1 rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm font-semibold hover:bg-white/10 active:scale-95 text-zinc-300 disabled:opacity-50">
+                                    Editar
+                                  </button>
+                                  <button onClick={() => handleEntregarPedido(delivery)} disabled={loadingActionId === delivery.id}
+                                    className="flex items-center gap-1 rounded-xl bg-brand-red px-4 py-2.5 text-sm font-semibold shadow-lg shadow-brand-red/20 active:scale-95 disabled:opacity-50">
+                                    {loadingActionId === delivery.id ? (
+                                      <><RefreshCw className="h-4 w-4 animate-spin" /> Cargando...</>
+                                    ) : (
+                                      <>Cobrar <ChevronRight className="h-4 w-4" /></>
+                                    )}
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {filteredDeliveries.length === 0 && (
+                    <div className="text-center py-12 border border-dashed border-white/10 rounded-3xl p-6">
+                      <Truck className="w-10 h-10 text-zinc-600 mx-auto mb-2" />
+                      <p className="text-zinc-400 text-sm">No se encontraron pedidos pendientes con los filtros aplicados.</p>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* ── SUB-TAB: ENTREGADOS ── */}
+              {pedidosSubTab === 'entregados' && (
+                <>
+                  {/* Barra de Búsqueda */}
+                  <div className="relative">
+                    <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                    <input
+                      value={pedidosSearch}
+                      onChange={e => setPedidosSearch(e.target.value)}
+                      placeholder="Buscar pedidos entregados por cliente, dirección o productos..."
+                      className="h-11 w-full rounded-2xl border border-white/10 bg-white/5 pl-11 pr-4 text-sm outline-none placeholder:text-zinc-500 focus:border-emerald-500 text-white"
+                    />
+                    {pedidosSearch && (
+                      <button onClick={() => setPedidosSearch("")} className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-zinc-400 hover:text-white">
+                        Limpiar
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Filtro por Canal de Origen / Creador */}
+                  {!isClienteMayorista && (
+                    <div className="flex gap-2 overflow-x-auto pb-1 text-xs">
+                      <button
+                        onClick={() => setPedidosOrigenFilter("All")}
+                        className={`px-3 py-1.5 rounded-xl font-bold transition-all shrink-0 ${
+                          pedidosOrigenFilter === "All"
+                            ? "bg-white/20 text-white border border-white/30"
+                            : "bg-white/5 text-zinc-400 hover:text-white border border-transparent"
+                        }`}
+                      >
+                        Todos los Canales ({entregados.length})
+                      </button>
+                      <button
+                        onClick={() => setPedidosOrigenFilter("mayorista")}
+                        className={`px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1 shrink-0 ${
+                          pedidosOrigenFilter === "mayorista"
+                            ? "bg-purple-500/30 text-purple-200 border border-purple-500/40"
+                            : "bg-white/5 text-zinc-400 hover:text-white border border-transparent"
+                        }`}
+                      >
+                        🛒 Mayoristas ({entregados.filter(d => d.creador?.tipo_origen === 'mayorista').length})
+                      </button>
+                      <button
+                        onClick={() => setPedidosOrigenFilter("preventista")}
+                        className={`px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1 shrink-0 ${
+                          pedidosOrigenFilter === "preventista"
+                            ? "bg-emerald-500/30 text-emerald-200 border border-emerald-500/40"
+                            : "bg-white/5 text-zinc-400 hover:text-white border border-transparent"
+                        }`}
+                      >
+                        🛵 Preventistas ({entregados.filter(d => d.creador?.tipo_origen === 'preventista').length})
+                      </button>
+                      <button
+                        onClick={() => setPedidosOrigenFilter("pos_local")}
+                        className={`px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1 shrink-0 ${
+                          pedidosOrigenFilter === "pos_local"
+                            ? "bg-cyan-500/30 text-cyan-200 border border-cyan-500/40"
+                            : "bg-white/5 text-zinc-400 hover:text-white border border-transparent"
+                        }`}
+                      >
+                        🏪 POS Panadería ({entregados.filter(d => d.creador?.tipo_origen === 'pos_local').length})
+                      </button>
+                      <button
+                        onClick={() => setPedidosOrigenFilter("admin")}
+                        className={`px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1 shrink-0 ${
+                          pedidosOrigenFilter === "admin"
+                            ? "bg-amber-500/30 text-amber-200 border border-amber-500/40"
+                            : "bg-white/5 text-zinc-400 hover:text-white border border-transparent"
+                        }`}
+                      >
+                        ⚡ Admin ({entregados.filter(d => d.creador?.tipo_origen === 'admin').length})
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Métricas rápidas de pedidos entregados */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 text-xs font-semibold text-zinc-400 bg-emerald-950/20 border border-emerald-500/20 px-4 py-2.5 rounded-2xl">
+                    <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
+                      <span className="text-emerald-300">✅ <b>{filteredEntregados.length}</b> {filteredEntregados.length === 1 ? 'pedido entregado' : 'pedidos entregados'}</span>
+                      {!isClienteMayorista && (
+                        <span>👥 <b>{groupedEntregadosByClient.length}</b> {groupedEntregadosByClient.length === 1 ? 'cliente' : 'clientes'}</span>
+                      )}
+                      {!isClienteMayorista && pedidosViewMode === 'clientes' && groupedEntregadosByClient.length > 0 && (
+                        <div className="flex items-center gap-1.5 border-l border-emerald-500/20 pl-3">
+                          <button
+                            type="button"
+                            onClick={() => collapseAllClients(groupedEntregadosByClient.map(g => g.clientKey))}
+                            className="px-2 py-0.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 transition-colors"
+                          >
+                            Colapsar todos
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => expandAllClients(groupedEntregadosByClient.map(g => g.clientKey))}
+                            className="px-2 py-0.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 transition-colors"
+                          >
+                            Expandir todos
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <span className="text-emerald-400 font-bold text-sm">
+                      Total: ${filteredEntregados.reduce((acc, d) => acc + (d.total_raw || parseFloat(String(d.total).replace(/[^0-9.-]+/g, "")) || 0), 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+
+                  {loadingEntregados && (
+                    <div className="flex justify-center py-10">
+                      <RefreshCw className="w-6 h-6 text-emerald-400 animate-spin" />
+                    </div>
+                  )}
+
+                  {!loadingEntregados && (!isClienteMayorista && pedidosViewMode === 'clientes') ? (
+                    <div className="space-y-4">
+                      {groupedEntregadosByClient.map(group => {
+                        const isCollapsed = !!collapsedClients[group.clientKey];
+                        return (
+                          <div key={group.clientKey} className="rounded-3xl border border-white/10 bg-white/5 overflow-hidden backdrop-blur-md transition-all shadow-xl hover:border-emerald-500/30">
+                            {/* Cabecera del Cliente (Click para expandir / contraer) */}
+                            <div
+                              onClick={() => toggleClientCollapse(group.clientKey)}
+                              className={`p-4 sm:p-5 bg-black/40 ${isCollapsed ? '' : 'border-b border-white/10'} flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer select-none hover:bg-white/[0.04] transition-colors`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="h-11 w-11 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center shrink-0">
+                                  <Users className="h-5 w-5 text-emerald-400" />
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <h2 className="text-base sm:text-lg font-bold text-white leading-tight">{group.customer}</h2>
+                                    <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                      {group.orders.length} {group.orders.length === 1 ? 'entregado' : 'entregados'}
+                                    </span>
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400 mt-1">
+                                    {group.address && group.address !== 'Sin dirección' && (
+                                      <span className="flex items-center gap-1 text-zinc-300">
+                                        📍 {group.address}
+                                      </span>
+                                    )}
+                                    {group.telefono && (
+                                      <span className="flex items-center gap-1 text-zinc-400">
+                                        📞 {group.telefono}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-between sm:justify-end gap-4 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-white/5">
+                                <div className="text-right">
+                                  <p className="text-[10px] uppercase font-bold text-zinc-500">Total Histórico</p>
+                                  <p className="text-lg font-extrabold text-emerald-400">
+                                    ${group.totalAmount.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                                  </p>
+                                </div>
+                                <div className={`p-2 rounded-xl bg-white/5 text-emerald-400 transition-all duration-200 ${isCollapsed ? '-rotate-90' : 'rotate-0'}`}>
+                                  <ChevronDown className="h-4 w-4" />
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Pedidos Entregados del Cliente */}
+                            {!isCollapsed && (
+                              <div className="p-3 sm:p-4 space-y-3 bg-black/10">
+                                {group.orders.map(delivery => (
+                                  <div key={delivery.id} className="rounded-2xl border border-white/10 bg-zinc-900/60 p-3.5 sm:p-4 flex flex-col justify-between gap-3 hover:border-emerald-500/40 transition-all">
+                                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <span className="text-sm font-bold text-white">Pedido #{delivery.id}</span>
+                                          <StatusBadge status="Delivered" />
+                                          <CreadorBadge creador={delivery.creador} />
+                                          {delivery.fecha_entrega && (
+                                            <span className="text-[10px] font-bold tracking-wider text-emerald-300 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
+                                              📅 ENTREGADO: {delivery.fecha_entrega.split('-').reverse().join('/')}
+                                            </span>
+                                          )}
+                                        </div>
+                                        {delivery.notas && (
+                                          <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-xl mt-2 inline-block">
+                                            💬 {delivery.notas}
+                                          </p>
+                                        )}
+                                        <div className="mt-2 text-xs text-zinc-300 bg-black/30 rounded-xl px-3 py-2 border border-white/5 font-mono">
+                                          {delivery.items}
+                                        </div>
+                                      </div>
+
+                                      <div className="sm:text-right shrink-0">
+                                        <p className="text-[10px] uppercase font-bold text-zinc-500">Total Pedido</p>
+                                        <p className="text-base sm:text-lg font-bold text-white">{delivery.total}</p>
+                                        <p className="text-[11px] text-zinc-400 mt-0.5">
+                                          {delivery.forma_de_pago ? `Pago: ${delivery.forma_de_pago}` : ''}
+                                        </p>
+                                      </div>
+                                    </div>
+
+                                    {/* Botones de acción (Remito Simple / Doble) */}
+                                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/5">
+                                      <div className="flex items-center gap-2">
+                                        <div className="relative group">
+                                          <button
+                                            className="flex items-center gap-1.5 rounded-xl bg-blue-500/10 border border-blue-500/20 px-3 py-2 hover:bg-blue-500/20 active:scale-95 text-blue-400 text-xs font-semibold"
+                                            title="Descargar remito">
+                                            <Download className="h-3.5 w-3.5" />
+                                            <span>Descargar Remito</span>
+                                          </button>
+                                          <div className="absolute bottom-full left-0 mb-2 hidden group-focus-within:flex flex-col bg-zinc-900 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-20 min-w-[160px]">
+                                            <button
+                                              onClick={async () => {
+                                                try {
+                                                  const res = await fetch(`${API_URL}/pedidos/${delivery.id}/comprobante?doble=false`, { headers: { Authorization: `Bearer ${token}` } });
+                                                  if (res.ok) {
+                                                    const blob = await res.blob();
+                                                    const url = window.URL.createObjectURL(blob);
+                                                    const a = document.createElement("a");
+                                                    a.href = url; a.download = `Remito_${delivery.id}.pdf`;
+                                                    document.body.appendChild(a); a.click(); a.remove();
+                                                    window.URL.revokeObjectURL(url);
+                                                  } else { alert("Error al descargar"); }
+                                                } catch { alert("Error de conexión"); }
+                                              }}
+                                              className="px-4 py-2.5 text-xs text-left hover:bg-white/10 text-zinc-300 transition-colors">
+                                              📄 Remito Simple
+                                            </button>
+                                            <button
+                                              onClick={async () => {
+                                                try {
+                                                  const res = await fetch(`${API_URL}/pedidos/${delivery.id}/comprobante?doble=true`, { headers: { Authorization: `Bearer ${token}` } });
+                                                  if (res.ok) {
+                                                    const blob = await res.blob();
+                                                    const url = window.URL.createObjectURL(blob);
+                                                    const a = document.createElement("a");
+                                                    a.href = url; a.download = `Remito_Doble_${delivery.id}.pdf`;
+                                                    document.body.appendChild(a); a.click(); a.remove();
+                                                    window.URL.revokeObjectURL(url);
+                                                  } else { alert("Error al descargar"); }
+                                                } catch { alert("Error de conexión"); }
+                                              }}
+                                              className="px-4 py-2.5 text-xs text-left hover:bg-white/10 text-zinc-300 border-t border-white/5 transition-colors">
+                                              📄📄 Remito Doble
+                                            </button>
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      <div className="flex items-center gap-2 ml-auto">
+                                        <span className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl text-xs font-bold">
+                                          <CheckCircle2 className="w-3.5 h-3.5" /> Entregado
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : !loadingEntregados ? (
+                    /* Vista Lista Tradicional de Entregados */
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {filteredEntregados.map(delivery => (
+                        <div key={delivery.id} className="rounded-3xl border border-white/10 bg-white/5 p-4 flex flex-col justify-between hover:border-emerald-500/30 transition-all">
+                          <div>
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <h3 className="text-base font-semibold">{delivery.customer}</h3>
+                                  <CreadorBadge creador={delivery.creador} />
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2 mt-1">
+                                  <span className="text-xs font-bold text-zinc-300">#{delivery.id}</span>
+                                  <p className="text-xs text-zinc-400">· {delivery.address}</p>
+                                  {delivery.fecha_entrega && (
+                                    <span className="text-[10px] font-semibold tracking-wider text-emerald-300 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                                      ENTREGADO: {delivery.fecha_entrega.split('-').reverse().join('/')}
+                                    </span>
+                                  )}
+                                </div>
+                                {delivery.notas && (
+                                  <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-lg mt-1.5 inline-block">
+                                    💬 {delivery.notas}
+                                  </p>
+                                )}
+                              </div>
+                              <StatusBadge status="Delivered" />
+                            </div>
+                            <div className="mt-2 rounded-xl bg-black/20 px-3 py-2 text-xs text-zinc-300">{delivery.items}</div>
+                          </div>
+                          <div className="mt-3 flex items-center justify-between">
+                            <div>
+                              <p className="text-xs text-zinc-500">Total</p>
+                              <p className="text-lg font-bold text-white">{delivery.total}</p>
+                              {delivery.forma_de_pago && (
+                                <p className="text-[10px] text-zinc-400">Pago: {delivery.forma_de_pago}</p>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="relative group">
+                                <button
+                                  className="flex items-center justify-center rounded-xl bg-blue-500/10 border border-blue-500/20 px-3 py-2.5 hover:bg-blue-500/20 active:scale-95 text-blue-400"
+                                  title="Descargar remito">
+                                  <Download className="h-4 w-4" />
+                                </button>
+                                <div className="absolute bottom-full right-0 mb-2 hidden group-focus-within:flex flex-col bg-zinc-900 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-20 min-w-[160px]">
+                                  <button
+                                    onClick={async () => {
+                                      try {
+                                        const res = await fetch(`${API_URL}/pedidos/${delivery.id}/comprobante?doble=false`, { headers: { Authorization: `Bearer ${token}` } });
+                                        if (res.ok) {
+                                          const blob = await res.blob();
+                                          const url = window.URL.createObjectURL(blob);
+                                          const a = document.createElement("a");
+                                          a.href = url; a.download = `Remito_${delivery.id}.pdf`;
+                                          document.body.appendChild(a); a.click(); a.remove();
+                                          window.URL.revokeObjectURL(url);
+                                        } else { alert("Error al descargar"); }
+                                      } catch { alert("Error de conexión"); }
+                                    }}
+                                    className="px-4 py-2.5 text-sm text-left hover:bg-white/10 text-zinc-300 transition-colors">
+                                    📄 Remito Simple
+                                  </button>
+                                  <button
+                                    onClick={async () => {
+                                      try {
+                                        const res = await fetch(`${API_URL}/pedidos/${delivery.id}/comprobante?doble=true`, { headers: { Authorization: `Bearer ${token}` } });
+                                        if (res.ok) {
+                                          const blob = await res.blob();
+                                          const url = window.URL.createObjectURL(blob);
+                                          const a = document.createElement("a");
+                                          a.href = url; a.download = `Remito_Doble_${delivery.id}.pdf`;
+                                          document.body.appendChild(a); a.click(); a.remove();
+                                          window.URL.revokeObjectURL(url);
+                                        } else { alert("Error al descargar"); }
+                                      } catch { alert("Error de conexión"); }
+                                    }}
+                                    className="px-4 py-2.5 text-sm text-left hover:bg-white/10 text-zinc-300 border-t border-white/5 transition-colors">
+                                    📄📄 Remito Doble
+                                  </button>
+                                </div>
+                              </div>
+
+                              <span className="inline-flex items-center gap-1 px-3 py-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl text-xs font-bold">
+                                <CheckCircle2 className="w-3.5 h-3.5" /> Entregado
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {!loadingEntregados && filteredEntregados.length === 0 && (
+                    <div className="text-center py-12 border border-dashed border-white/10 rounded-3xl p-6">
+                      <CheckCircle2 className="w-10 h-10 text-emerald-600/50 mx-auto mb-2" />
+                      <p className="text-zinc-400 text-sm">No se encontraron pedidos entregados con los filtros aplicados.</p>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
 
@@ -5139,36 +6476,54 @@ export default function BakeryDriverApp() {
 
         </main>
 
-        {/* ── Bottom Bar POS ── */}
-        {activeTab === "pos" && (
-          <div className={`fixed bottom-24 md:bottom-8 left-1/2 md:left-[calc(50%+8rem)] z-20 w-[calc(100%-2rem)] max-w-md md:max-w-[calc(100%-18rem)] xl:max-w-6xl -translate-x-1/2 rounded-3xl border border-white/10 bg-black/60 p-4 backdrop-blur-2xl transition-all duration-300 ${
+        {/* ── Bottom Bar POS / Mayorista ── */}
+        {((!isClienteMayorista && activeTab === "pos") || (isClienteMayorista && activeTab === "cargar_pedido")) && (
+          <div className={`fixed bottom-24 md:bottom-8 left-1/2 md:left-[calc(50%+8rem)] z-20 w-[calc(100%-2rem)] max-w-md md:max-w-[calc(100%-18rem)] xl:max-w-6xl -translate-x-1/2 rounded-3xl border border-white/10 bg-black/80 p-4 backdrop-blur-2xl transition-all duration-300 ${
             Number(cartTotal) > 0 ? "scale-100 opacity-100 shadow-2xl shadow-brand-red/20" : "scale-95 opacity-80"
           }`}>
             <div className="flex items-center justify-between gap-4">
               <div>
-                <p className="text-xs uppercase tracking-widest text-zinc-500">Total · {cartCount} items</p>
+                <p className="text-xs uppercase tracking-widest text-zinc-400 font-bold">Total · {cartCount} items</p>
                 <h3 className="text-2xl font-bold">${cartTotal}</h3>
               </div>
-              <button onClick={() => {
-                if (Number(cartTotal) > 0) {
-                  if (editingPedido) {
-                    setPedidoCheckout({
-                      id: editingPedido.id,
-                      items: [],
-                      cliente: editingPedido.cliente,
-                    });
-                  } else {
-                    setPedidoCheckout(null);
+              {isClienteMayorista ? (
+                <button
+                  onClick={handleCrearPedidoMayorista}
+                  disabled={Number(cartTotal) === 0 || loadingMayoristaPedido}
+                  className={`rounded-2xl px-6 py-3.5 text-sm font-bold transition-all duration-300 flex items-center gap-2 ${
+                    Number(cartTotal) > 0 && !loadingMayoristaPedido
+                      ? "bg-brand-red text-white shadow-xl shadow-brand-red/30 active:scale-95 cursor-pointer"
+                      : "bg-zinc-800 text-zinc-500 cursor-not-allowed"
+                  }`}
+                >
+                  {loadingMayoristaPedido ? (
+                    <><RefreshCw className="h-4 w-4 animate-spin" /> Registrando...</>
+                  ) : (
+                    <>Confirmar Pedido <ChevronRight className="h-4 w-4" /></>
+                  )}
+                </button>
+              ) : (
+                <button onClick={() => {
+                  if (Number(cartTotal) > 0) {
+                    if (editingPedido) {
+                      setPedidoCheckout({
+                        id: editingPedido.id,
+                        items: [],
+                        cliente: editingPedido.cliente,
+                      });
+                    } else {
+                      setPedidoCheckout(null);
+                    }
+                    setCheckoutOpen(true);
                   }
-                  setCheckoutOpen(true);
-                }
-              }}
-                disabled={Number(cartTotal) === 0}
-                className={`rounded-2xl px-6 py-3.5 text-sm font-bold transition-all duration-300 ${
-                  Number(cartTotal) > 0 ? "bg-brand-red text-white shadow-xl shadow-brand-red/30 active:scale-95" : "bg-zinc-800 text-zinc-500"
-                }`}>
-                {editingPedido ? "Guardar" : "Cobrar"}
-              </button>
+                }}
+                  disabled={Number(cartTotal) === 0}
+                  className={`rounded-2xl px-6 py-3.5 text-sm font-bold transition-all duration-300 ${
+                    Number(cartTotal) > 0 ? "bg-brand-red text-white shadow-xl shadow-brand-red/30 active:scale-95" : "bg-zinc-800 text-zinc-500"
+                  }`}>
+                  {editingPedido ? "Guardar" : "Cobrar"}
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -5176,24 +6531,34 @@ export default function BakeryDriverApp() {
         {/* ── NAV ── */}
         <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 h-24 w-full border-t border-white/10 bg-black/70 backdrop-blur-3xl overflow-x-auto overflow-y-visible [&::-webkit-scrollbar]:hidden">
           <div className={`flex items-center gap-6 px-6 h-full ${(isAdmin || isProduccion) ? 'justify-start min-w-max' : 'justify-around w-full'}`}>
-            {!isProduccion && (
+            {isClienteMayorista ? (
               <>
-                <NavButton icon={Truck}        label="Pedidos" value="pedidos" badge={deliveries.filter(d => d.status === "Late").length} />
-                {!isVendedor && <NavButton icon={Package} label="Stock" value="stock" />}
-                <NavButton icon={ShoppingCart} label="Venta"   value="pos" prominent />
-                {!isVendedor && <NavButton icon={Users}        label="Clientes" value="clientes" />}
-                <NavButton icon={Receipt}      label="Historial" value="ventas" />
+                <NavButton icon={ShoppingCart} label="Hacer Pedido" value="cargar_pedido" prominent />
+                <NavButton icon={Truck} label="Mis Pedidos" value="pedidos" badge={deliveries.length} />
+                <NavButton icon={Receipt} label="Mi Cuenta" value="cuenta" />
               </>
-            )}
-            
-            {(isAdmin || isProduccion) && (
+            ) : (
               <>
-                {!isProduccion && <div className="w-[1px] h-10 bg-white/10 mx-2"></div>}
-                <NavButton icon={Warehouse}    label="Depósito" value="deposito" badge={depositoReservasPendientes.length} />
-                {isAdmin && <NavButton icon={ClipboardList} label="Materias" value="materias" />}
-                <NavButton icon={CheckCircle2} label="Recetas" value="recetas" />
-                {isAdmin && <NavButton icon={Truck}        label="Despacho" value="despacho" />}
-                {isAdmin && <NavButton icon={UserIcon}     label="Usuarios" value="usuarios" />}
+                {!isProduccion && (
+                  <>
+                    <NavButton icon={Truck}        label="Pedidos" value="pedidos" badge={deliveries.filter(d => d.status === "Late").length} />
+                    {!isVendedor && <NavButton icon={Package} label="Stock" value="stock" />}
+                    <NavButton icon={ShoppingCart} label="Venta"   value="pos" prominent />
+                    {!isVendedor && <NavButton icon={Users}        label="Clientes" value="clientes" />}
+                    <NavButton icon={Receipt}      label="Historial" value="ventas" />
+                  </>
+                )}
+                
+                {(isAdmin || isProduccion) && (
+                  <>
+                    {!isProduccion && <div className="w-[1px] h-10 bg-white/10 mx-2"></div>}
+                    <NavButton icon={Warehouse}    label="Depósito" value="deposito" badge={depositoReservasPendientes.length} />
+                    {isAdmin && <NavButton icon={ClipboardList} label="Materias" value="materias" />}
+                    <NavButton icon={CheckCircle2} label="Recetas" value="recetas" />
+                    {isAdmin && <NavButton icon={Truck}        label="Despacho" value="despacho" />}
+                    {isAdmin && <NavButton icon={UserIcon}     label="Usuarios" value="usuarios" />}
+                  </>
+                )}
               </>
             )}
           </div>
