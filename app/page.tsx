@@ -6,7 +6,8 @@ import {
   CircleDollarSign, ClipboardList, ChevronRight, LogOut,
   User as UserIcon, X, Check, Calendar, CheckCircle2,
   CreditCard, Banknote, Clock, Receipt, ArrowLeft,
-  ChevronDown, AlertCircle, RefreshCw, Trash2, PieChart as PieChartIcon, BarChart3, Edit2, Download, Warehouse, Archive
+  ChevronDown, AlertCircle, RefreshCw, Trash2, PieChart as PieChartIcon, BarChart3, Edit2, Download, Warehouse, Archive,
+  Building2
 } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 
@@ -16,6 +17,9 @@ import { CSS } from '@dnd-kit/utilities';
 
 import DespachoRepartidor from "./components/DespachoRepartidor";
 import UsuariosCrud from "./components/UsuariosCrud";
+import ComprasApp from "./components/compras/ComprasApp";
+import { Proveedor, ProveedorDetalleModal, CargarPagoProveedorModal } from "./components/personas/ProveedorModals";
+import PosMostrador from "./components/pos/PosMostrador";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://role.test/api";
 
@@ -44,7 +48,7 @@ function SortableProductItem({ product, disabled, qty, onUpdateQuantity, onSetQu
               className="h-8 w-8 rounded-full border border-white/10 bg-white/5 flex items-center justify-center hover:bg-white/10 disabled:opacity-30">
               <Minus className="h-4 w-4" />
             </button>
-            <input type="number" min="0" max={product.quantity} value={qty || ""} placeholder="0"
+            <input type="number" step="any" min="0" max={product.quantity} value={qty || ""} placeholder="0"
               onChange={(e) => onSetQuantity(product, e.target.value)}
               className="w-10 bg-transparent text-center text-sm font-bold outline-none" />
             <button onClick={() => onUpdateQuantity(product, 1)} disabled={disabled || qty >= product.quantity}
@@ -1743,9 +1747,14 @@ export default function BakeryDriverApp() {
   const isVendedor = user?.roles?.some((r: string) => r.toLowerCase() === 'vendedor');
   const isVehiculo1 = user?.roles?.some((r: string) => r.toLowerCase() === 'vehiculo1');
   const isVehiculo2 = user?.roles?.some((r: string) => r.toLowerCase() === 'vehiculo2');
+  const isRepartidor = user?.roles?.some((r: string) => 
+    ['repartidor', 'preventista', 'vehiculo1', 'vehiculo2'].includes(r.toLowerCase())
+  );
   const isClienteMayorista = user?.roles?.some((r: string) => 
     ['cliente_mayorista', 'cliente mayorista', 'cliente'].includes(r.toLowerCase())
   );
+
+  const [adminPosMode, setAdminPosMode] = useState<"mostrador" | "reparto">("mostrador");
 
   const [activeTab, setActiveTab]           = useState("pos");
   const [deliveryFilter, setDeliveryFilter] = useState("All");
@@ -2336,8 +2345,43 @@ export default function BakeryDriverApp() {
   // Cliente detalle
   const [clienteDetalle, setClienteDetalle] = useState<Client | null>(null);
 
+  // Proveedores state
+  const [proveedores, setProveedores] = useState<Proveedor[]>([]);
+  const [loadingProveedores, setLoadingProveedores] = useState(false);
+  const [personaSubTab, setPersonaSubTab] = useState<'clientes' | 'proveedores'>('clientes');
+  const [proveedorDetalle, setProveedorDetalle] = useState<Proveedor | null>(null);
+  const [paymentProveedor, setPaymentProveedor] = useState<Proveedor | null>(null);
+  const [proveedorSearch, setProveedorSearch] = useState("");
+
+  const filteredProveedores = useMemo(() => {
+    if (!proveedorSearch.trim()) return proveedores;
+    const q = proveedorSearch.toLowerCase();
+    return proveedores.filter(p =>
+      p.name.toLowerCase().includes(q) ||
+      (p.phone && p.phone.toLowerCase().includes(q)) ||
+      (p.address && p.address.toLowerCase().includes(q))
+    );
+  }, [proveedores, proveedorSearch]);
+
+  const fetchProveedores = useCallback(async () => {
+    if (!token) return;
+    try {
+      setLoadingProveedores(true);
+      const res = await fetch(`${API_URL}/proveedores`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setProveedores(await res.json());
+      }
+    } catch (e) {
+    } finally {
+      setLoadingProveedores(false);
+    }
+  }, [token]);
+
   // Admin Personas (CRUD)
   const [adminClientesTab, setAdminClientesTab] = useState<'saldos' | 'gestion'>('saldos');
+  const [adminPersonasTipo, setAdminPersonasTipo] = useState<string>("");
   const [adminPersonas, setAdminPersonas] = useState<any[]>([]);
   const [adminPersonasPage, setAdminPersonasPage] = useState(1);
   const [adminPersonasTotalPages, setAdminPersonasTotalPages] = useState(1);
@@ -2370,7 +2414,8 @@ export default function BakeryDriverApp() {
     const fetchAdminPersonas = async () => {
       if (adminPersonasPage === 1) setLoadingAdminPersonas(true);
       try {
-        const res = await fetch(`${API_URL}/admin/personas?page=${adminPersonasPage}&search=${adminPersonasSearch}`, {
+        const tipoParam = adminPersonasTipo ? `&tipo_persona=${adminPersonasTipo}` : '';
+        const res = await fetch(`${API_URL}/admin/personas?page=${adminPersonasPage}&search=${adminPersonasSearch}${tipoParam}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (res.ok) {
@@ -2392,7 +2437,7 @@ export default function BakeryDriverApp() {
       fetchAdminPersonas();
     }, 400);
     return () => clearTimeout(delayDebounceFn);
-  }, [token, user, adminPersonasPage, adminPersonasSearch, adminPersonasRefresh]);
+  }, [token, user, adminPersonasPage, adminPersonasSearch, adminPersonasTipo, adminPersonasRefresh]);
 
   const handleSavePersona = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2413,6 +2458,9 @@ export default function BakeryDriverApp() {
         if (personaForm.tipo_persona === 'cliente') {
            const cliRes = await fetch(`${API_URL}/clientes`, { headers: { Authorization: `Bearer ${token}` } });
            if (cliRes.ok) setClients(await cliRes.json());
+        }
+        if (personaForm.tipo_persona === 'proveedor') {
+           fetchProveedores();
         }
       } else {
         const err = await res.json().catch(() => ({}));
@@ -2463,16 +2511,18 @@ export default function BakeryDriverApp() {
     if (full) setLoading(true);
     const headers = { Authorization: `Bearer ${authToken}` };
     try {
-      const [stockRes, pedRes, cliRes, entRes] = await Promise.all([
+      const [stockRes, pedRes, cliRes, entRes, provRes] = await Promise.all([
         fetch(`${API_URL}/stock`, { headers }),
         fetch(`${API_URL}/pedidos?filtro_estado=pendientes`, { headers }),
         fetch(`${API_URL}/clientes`, { headers }),
         fetch(`${API_URL}/pedidos?filtro_estado=entregados`, { headers }),
+        fetch(`${API_URL}/proveedores`, { headers }),
       ]);
       if (stockRes.ok) setProducts(await stockRes.json());
       if (pedRes.ok)   setDeliveries(await pedRes.json());
       if (cliRes.ok)   setClients(await cliRes.json());
       if (entRes.ok)   setEntregados(await entRes.json());
+      if (provRes.ok)  setProveedores(await provRes.json());
       
       if (full) {
         const usrRes = await fetch(`${API_URL}/user`, { headers });
@@ -2580,6 +2630,15 @@ export default function BakeryDriverApp() {
     }
   }, [fetchDepositoMovimientos, depositoSubTab]);
 
+  useEffect(() => {
+    const handleCompraRegistrada = () => {
+      fetchDeposito();
+      fetchDepositoMovimientos();
+    };
+    window.addEventListener('compra-registrada', handleCompraRegistrada);
+    return () => window.removeEventListener('compra-registrada', handleCompraRegistrada);
+  }, [fetchDeposito, fetchDepositoMovimientos]);
+
   const fetchMateriaPrimas = useCallback(async (page = 1, search = '') => {
     if (!token) return;
     setLoadingMP(true);
@@ -2665,10 +2724,10 @@ export default function BakeryDriverApp() {
       setCart(prev => ({ ...prev, [product.id]: 0 }));
       return;
     }
-    const parsed = parseInt(value, 10);
+    const parsed = parseFloat(value.replace(",", "."));
     if (isNaN(parsed)) return;
     const maxLimit = isClienteMayorista ? 99999 : product.quantity;
-    const clamped = Math.max(0, Math.min(maxLimit, parsed));
+    const clamped = Math.max(0, Math.min(maxLimit, Math.round(parsed * 1000) / 1000));
     setCart(prev => ({ ...prev, [product.id]: clamped }));
   };
 
@@ -3159,7 +3218,7 @@ export default function BakeryDriverApp() {
                     )}
                     <button onClick={() => setActiveTab('pos')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'pos' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><ShoppingCart className="w-5 h-5"/> <span className="font-semibold text-sm">Venta Rápida</span></button>
                     {!isVendedor && (
-                      <button onClick={() => setActiveTab('clientes')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'clientes' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Users className="w-5 h-5"/> <span className="font-semibold text-sm">Clientes</span></button>
+                      <button onClick={() => { setActiveTab('clientes'); fetchProveedores(); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'clientes' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Users className="w-5 h-5"/> <span className="font-semibold text-sm">Personas</span></button>
                     )}
                     <button onClick={() => setActiveTab('ventas')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'ventas' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Receipt className="w-5 h-5"/> <span className="font-semibold text-sm">Historial</span></button>
                   </>
@@ -3174,6 +3233,11 @@ export default function BakeryDriverApp() {
                 {isAdmin && (
                   <button onClick={() => { setActiveTab('materias'); fetchMateriaPrimas(mpPage, mpSearch); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'materias' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
                     <ClipboardList className="w-5 h-5"/> <span className="font-semibold text-sm">Materias Primas</span>
+                  </button>
+                )}
+                {isAdmin && (
+                  <button onClick={() => setActiveTab('compras')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'compras' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
+                    <ShoppingCart className="w-5 h-5"/> <span className="font-semibold text-sm">Compras</span>
                   </button>
                 )}
                 {(isAdmin || isProduccion) && (
@@ -3458,8 +3522,49 @@ export default function BakeryDriverApp() {
 
           {/* ── POS ── */}
           {!isClienteMayorista && activeTab === "pos" && (
-            <div className="space-y-4">
-              {editingPedido && (
+            isVendedor || (isAdmin && adminPosMode === "mostrador") ? (
+              <PosMostrador
+                token={token!}
+                user={user}
+                products={products}
+                clients={clients}
+                apiUrl={API_URL}
+                isAdmin={isAdmin}
+                posMode={adminPosMode}
+                onTogglePosMode={setAdminPosMode}
+                onVentaExitosa={() => fetchAllData(token!, false)}
+              />
+            ) : (
+              <div className="space-y-4">
+                {isAdmin && (
+                  <div className="flex items-center justify-end">
+                    <div className="flex items-center bg-zinc-900 border border-white/10 p-1 rounded-xl text-xs font-semibold">
+                      <button
+                        type="button"
+                        onClick={() => setAdminPosMode("mostrador")}
+                        className={`px-3 py-1.5 rounded-lg transition-all ${
+                          adminPosMode === "mostrador"
+                            ? "bg-brand-red text-white shadow-sm"
+                            : "text-zinc-400 hover:text-white"
+                        }`}
+                      >
+                        Mostrador (Local)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAdminPosMode("reparto")}
+                        className={`px-3 py-1.5 rounded-lg transition-all ${
+                          adminPosMode === "reparto"
+                            ? "bg-brand-yellow text-zinc-950 font-bold shadow-sm"
+                            : "text-zinc-400 hover:text-white"
+                        }`}
+                      >
+                        Móviles (Reparto)
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {editingPedido && (
                 <div className="rounded-2xl border border-brand-red/30 bg-brand-red/10 p-4 flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <Clock className="h-5 w-5 text-brand-yellow shrink-0" />
@@ -3559,6 +3664,7 @@ export default function BakeryDriverApp() {
                               </button>
                               <input
                                 type="number"
+                                step="any"
                                 min={0}
                                 max={product.quantity}
                                 value={qty === 0 ? "" : qty}
@@ -3583,7 +3689,8 @@ export default function BakeryDriverApp() {
                 </>
               )}
             </div>
-          )}
+          )
+        )}
 
           {/* ── PEDIDOS ── */}
           {activeTab === "pedidos" && (
@@ -5274,12 +5381,12 @@ export default function BakeryDriverApp() {
             </div>
           )}
 
-          {/* ── CLIENTES ── */}
+          {/* ── PERSONAS (CLIENTES & PROVEEDORES) ── */}
           {activeTab === "clientes" && !isVendedor && (
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-center justify-between w-full sm:w-auto gap-3">
-                  <h1 className="text-2xl font-bold">Clientes {isAdmin ? "(Saldos & Gestión)" : ""}</h1>
+                  <h1 className="text-2xl font-bold">Personas {isAdmin ? "(Saldos & Gestión)" : ""}</h1>
                   {!isAdmin && (
                     <button
                       onClick={() => {
@@ -5289,7 +5396,7 @@ export default function BakeryDriverApp() {
                       className="flex items-center gap-1.5 px-3 py-2 bg-brand-red hover:bg-red-600 rounded-xl text-xs font-bold text-white transition-all shadow-md shadow-brand-red/20 shrink-0"
                     >
                       <Plus className="w-3.5 h-3.5" />
-                      <span>+ Nuevo Cliente</span>
+                      <span>+ Nueva Persona</span>
                     </button>
                   )}
                 </div>
@@ -5317,34 +5424,204 @@ export default function BakeryDriverApp() {
               </div>
 
               {(!isAdmin || adminClientesTab === 'saldos') && (
-                <>
-                  <div className="relative">
-                    <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-                    <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar clientes..."
-                      className="h-12 w-full rounded-2xl border border-white/10 bg-white/5 pl-11 pr-4 text-sm outline-none placeholder:text-zinc-500 focus:border-brand-red transition-colors" />
+                <div className="space-y-4">
+                  {/* Selector Sub-pestañas: Clientes (A cobrar) vs Proveedores (A pagar) */}
+                  <div className="flex bg-black/40 p-1 rounded-2xl border border-white/10 w-full sm:w-auto gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setPersonaSubTab('clientes')}
+                      className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                        personaSubTab === 'clientes'
+                          ? 'bg-brand-red text-white shadow-md shadow-brand-red/20'
+                          : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      <Users className="w-4 h-4" />
+                      <span>Clientes (A cobrar)</span>
+                      {clients.filter(c => c.balance > 0).length > 0 && (
+                        <span className="bg-red-500/20 text-red-300 text-[10px] px-1.5 py-0.5 rounded-full border border-red-500/30 font-bold">
+                          {clients.filter(c => c.balance > 0).length}
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setPersonaSubTab('proveedores'); fetchProveedores(); }}
+                      className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                        personaSubTab === 'proveedores'
+                          ? 'bg-brand-red text-white shadow-md shadow-brand-red/20'
+                          : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      <Building2 className="w-4 h-4" />
+                      <span>Proveedores (A pagar)</span>
+                      {proveedores.filter(p => p.balance > 0).length > 0 && (
+                        <span className="bg-brand-yellow/20 text-brand-yellow text-[10px] px-1.5 py-0.5 rounded-full border border-brand-yellow/30 font-bold">
+                          {proveedores.filter(p => p.balance > 0).length}
+                        </span>
+                      )}
+                    </button>
                   </div>
-                  <div className="flex flex-col gap-2">
-                    {filteredClients.map(client => (
-                      <button key={client.id} onClick={() => setClienteDetalle(client)}
-                        className="w-full rounded-2xl border border-white/10 bg-white/5 p-4 text-left active:scale-[0.99] transition-all flex items-center justify-between">
-                        <div className="flex flex-col min-w-0 pr-2">
-                          <h3 className="text-sm font-semibold truncate text-white">{client.name}</h3>
-                          <p className="text-[11px] text-zinc-400 mt-0.5 truncate">{client.address || "Sin dirección"}</p>
+
+                  {/* ── SUBTAB: CLIENTES (A COBRAR) ── */}
+                  {personaSubTab === 'clientes' && (
+                    <>
+                      <div className="relative">
+                        <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar clientes..."
+                          className="h-12 w-full rounded-2xl border border-white/10 bg-white/5 pl-11 pr-4 text-sm outline-none placeholder:text-zinc-500 focus:border-brand-red transition-colors" />
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        {filteredClients.map(client => (
+                          <button key={client.id} onClick={() => setClienteDetalle(client)}
+                            className="w-full rounded-2xl border border-white/10 bg-white/5 p-4 text-left active:scale-[0.99] transition-all flex items-center justify-between">
+                            <div className="flex flex-col min-w-0 pr-2">
+                              <h3 className="text-sm font-semibold truncate text-white">{client.name}</h3>
+                              <p className="text-[11px] text-zinc-400 mt-0.5 truncate">{client.address || "Sin dirección"}</p>
+                            </div>
+                            <div className="flex items-center gap-3 shrink-0">
+                              <div className={`rounded-xl px-3 py-1.5 text-xs font-bold ${client.balance > 0 ? "bg-red-500/20 text-red-300" : "bg-emerald-500/20 text-emerald-300"}`}>
+                                {client.balance > 0 ? `-$${client.balance.toLocaleString('es-AR')}` : "OK"}
+                              </div>
+                              <ChevronRight className="h-4 w-4 text-zinc-500" />
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+
+                  {/* ── SUBTAB: PROVEEDORES (A PAGAR) ── */}
+                  {personaSubTab === 'proveedores' && (
+                    <div className="space-y-4">
+                      {/* Banner resumen de deuda total a proveedores */}
+                      <div className="rounded-2xl p-4 bg-white/5 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                          <span className="text-xs text-zinc-400 font-semibold uppercase tracking-wider block">Deuda total acumulada a proveedores</span>
+                          <span className="text-2xl font-bold text-red-400">
+                            ${proveedores.reduce((acc, p) => acc + (p.balance || 0), 0).toLocaleString('es-AR')}
+                          </span>
                         </div>
-                        <div className="flex items-center gap-3 shrink-0">
-                          <div className={`rounded-xl px-3 py-1.5 text-xs font-bold ${client.balance > 0 ? "bg-red-500/20 text-red-300" : "bg-emerald-500/20 text-emerald-300"}`}>
-                            {client.balance > 0 ? `-$${client.balance.toLocaleString('es-AR')}` : "OK"}
-                          </div>
-                          <ChevronRight className="h-4 w-4 text-zinc-500" />
+                        <div className="flex items-center gap-2 text-xs text-zinc-400">
+                          <span className="px-3 py-1 rounded-xl bg-white/5 border border-white/10">
+                            <b>{proveedores.filter(p => p.balance > 0).length}</b> proveedores con saldo pendiente
+                          </span>
+                          <button
+                            type="button"
+                            onClick={fetchProveedores}
+                            className="p-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-zinc-300 transition-colors"
+                            title="Actualizar"
+                          >
+                            <RefreshCw className={`w-4 h-4 ${loadingProveedores ? 'animate-spin text-brand-red' : ''}`} />
+                          </button>
                         </div>
-                      </button>
-                    ))}
-                  </div>
-                </>
+                      </div>
+
+                      <div className="relative">
+                        <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                        <input
+                          value={proveedorSearch}
+                          onChange={e => setProveedorSearch(e.target.value)}
+                          placeholder="Buscar proveedores por nombre, teléfono o dirección..."
+                          className="h-12 w-full rounded-2xl border border-white/10 bg-white/5 pl-11 pr-4 text-sm outline-none placeholder:text-zinc-500 focus:border-brand-red transition-colors"
+                        />
+                      </div>
+
+                      {loadingProveedores ? (
+                        <div className="space-y-2">
+                          {[1, 2, 3].map(i => <div key={i} className="h-20 rounded-2xl bg-white/5 animate-pulse" />)}
+                        </div>
+                      ) : filteredProveedores.length === 0 ? (
+                        <div className="p-8 text-center bg-white/5 rounded-2xl border border-white/5 text-zinc-500 text-sm">
+                          No se encontraron proveedores registrados
+                        </div>
+                      ) : (
+                        <div className="flex flex-col gap-2.5">
+                          {filteredProveedores.map(prov => (
+                            <div
+                              key={prov.id}
+                              className="w-full rounded-2xl border border-white/10 bg-white/5 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-white/20 transition-all"
+                            >
+                              <div className="flex flex-col min-w-0 pr-2">
+                                <div className="flex items-center gap-2">
+                                  <h3 className="text-sm font-semibold truncate text-white">{prov.name}</h3>
+                                  {prov.compras_pendientes > 0 && (
+                                    <span className="text-[10px] bg-red-500/20 text-red-300 border border-red-500/30 px-2 py-0.5 rounded-md font-medium">
+                                      {prov.compras_pendientes} {prov.compras_pendientes === 1 ? 'compra impaga' : 'compras impagas'}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-[11px] text-zinc-400 mt-1 truncate">
+                                  {prov.address || "Sin dirección"} {prov.phone ? `• Tel: ${prov.phone}` : ""}
+                                </p>
+                                {prov.fecha_mas_antigua && prov.balance > 0 && (
+                                  <p className="text-[10px] text-zinc-500 mt-0.5">
+                                    Deuda más antigua: {new Date(prov.fecha_mas_antigua).toLocaleDateString('es-AR')}
+                                  </p>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-2.5 shrink-0 self-end sm:self-center">
+                                <div className={`rounded-xl px-3 py-1.5 text-xs font-bold ${
+                                  prov.balance > 0
+                                    ? "bg-red-500/20 text-red-300 border border-red-500/30"
+                                    : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                                }`}>
+                                  {prov.balance > 0 ? `-$${prov.balance.toLocaleString('es-AR')}` : "Al día ✓"}
+                                </div>
+
+                                {prov.balance > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setPaymentProveedor(prov)}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-brand-red hover:bg-red-600 text-white text-xs font-bold transition-all shadow-md shadow-brand-red/20 active:scale-95"
+                                  >
+                                    <CircleDollarSign className="w-3.5 h-3.5" />
+                                    <span>Pagar</span>
+                                  </button>
+                                )}
+
+                                <button
+                                  type="button"
+                                  onClick={() => setProveedorDetalle(prov)}
+                                  className="p-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-zinc-400 hover:text-white transition-colors"
+                                  title="Ver compras e historial"
+                                >
+                                  <ChevronRight className="h-4 w-4" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
 
               {isAdmin && adminClientesTab === 'gestion' && (
                 <div className="space-y-4 relative pb-20">
+                  {/* Filtro por tipo de persona en CRUD */}
+                  <div className="flex bg-black/30 p-1 rounded-xl border border-white/5 gap-1 overflow-x-auto">
+                    {[
+                      { id: "", label: "Todos" },
+                      { id: "cliente", label: "Clientes" },
+                      { id: "proveedor", label: "Proveedores" },
+                      { id: "empleado", label: "Empleados" }
+                    ].map(t => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => { setAdminPersonasTipo(t.id); setAdminPersonasPage(1); }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+                          adminPersonasTipo === t.id ? "bg-brand-red text-white" : "text-zinc-400 hover:text-zinc-200"
+                        }`}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+
                   <div className="flex items-center gap-2">
                     <div className="relative flex-1">
                       <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
@@ -5583,11 +5860,17 @@ export default function BakeryDriverApp() {
                               <div className="bg-black/20 rounded-xl p-2">
                                 <p className="text-zinc-400">En Depósito</p>
                                 <div className="text-center pt-1"><InlineStockEdit id={mp.id} initialStock={mp.stock_deposito} onSave={handleInlineAjusteMP} /></div>
-                                <p className="text-[10px] text-zinc-500 font-normal">{mp.unidad_medida || 'kg'}</p>
+                                <p className="text-xs text-brand-yellow font-bold mt-0.5">{mp.unidad_medida || 'bolsas'}</p>
+                                {mp.peso > 0 && (
+                                  <p className="text-[10px] text-zinc-500 font-mono">({(mp.stock_deposito * mp.peso).toFixed(1).replace('.0', '')} kg)</p>
+                                )}
                               </div>
                               <div className="bg-zinc-800 rounded-xl p-2">
                                 <p className="text-zinc-500">En Uso / Panadería</p>
-                                <p className="font-bold text-zinc-300 text-lg">{mp.stock_uso} <span className="text-sm text-zinc-500 font-normal">{mp.unidad_medida || 'kg'}</span></p>
+                                <p className="font-bold text-zinc-300 text-lg mt-1">{mp.stock_uso} <span className="text-xs text-brand-yellow font-bold">{mp.unidad_medida || 'bolsas'}</span></p>
+                                {mp.peso > 0 && (
+                                  <p className="text-[10px] text-zinc-500 font-mono">({(mp.stock_uso * mp.peso).toFixed(1).replace('.0', '')} kg)</p>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -5670,10 +5953,21 @@ export default function BakeryDriverApp() {
                       <input type="text" placeholder="Buscar por nombre..." value={depositoHistorySearch} onChange={e => { setDepositoHistorySearch(e.target.value); setDepositoHistoryPage(1); }}
                         className="w-full h-10 pl-9 pr-4 rounded-xl bg-white/5 border border-white/10 text-sm text-white focus:border-brand-red outline-none" />
                     </div>
-                    <div className="relative shrink-0">
-                      <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
-                      <input type="date" value={depositoHistoryDate} onChange={e => { setDepositoHistoryDate(e.target.value); setDepositoHistoryPage(1); }}
-                        className="h-10 pl-9 pr-4 rounded-xl bg-white/5 border border-white/10 text-sm text-white focus:border-brand-red outline-none [color-scheme:dark]" />
+                    <div className="flex gap-2 shrink-0">
+                      <div className="relative">
+                        <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                        <input type="date" value={depositoHistoryDate} onChange={e => { setDepositoHistoryDate(e.target.value); setDepositoHistoryPage(1); }}
+                          className="h-10 pl-9 pr-4 rounded-xl bg-white/5 border border-white/10 text-sm text-white focus:border-brand-red outline-none [color-scheme:dark]" />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => fetchDepositoMovimientos()}
+                        className="h-10 px-3.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-zinc-300 hover:text-white transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
+                        title="Recargar historial"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Actualizar</span>
+                      </button>
                     </div>
                   </div>
 
@@ -5948,6 +6242,13 @@ export default function BakeryDriverApp() {
             </div>
           )}
 
+          {/* ── COMPRAS ── */}
+          {activeTab === "compras" && isAdmin && (
+            <div className="p-4">
+              <ComprasApp token={token!} />
+            </div>
+          )}
+
           {/* ── MIS VENTAS ── */}
           {activeTab === "ventas" && (
             <div className="space-y-4">
@@ -6201,6 +6502,7 @@ export default function BakeryDriverApp() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       {misVentas.map(v => {
                         const isCobro = v.tipo === "cobro_cuenta";
+                        const isSalida = v.tipo === "pago_proveedor" || v.tipo === "salida" || (typeof v.tipo === "string" && v.tipo.startsWith("pago_"));
                         return (
                           <div
                             key={`${v.tipo}-${v.id}`}
@@ -6209,64 +6511,86 @@ export default function BakeryDriverApp() {
                           >
                             <div className="flex-1 min-w-0 mr-2">
                               <div className="flex items-center justify-between gap-2">
-                                <p className="text-sm font-semibold truncate">{v.customer}</p>
-                                <div className="relative group/dl" onClick={e => e.stopPropagation()}>
-                                  <button
-                                    className="p-1.5 bg-white/10 rounded-md hover:bg-white/20 transition-colors shrink-0"
-                                    title="Descargar Comprobante"
-                                  >
-                                    <Download className="w-3.5 h-3.5 text-zinc-300" />
-                                  </button>
-                                  <div className="absolute bottom-full right-0 mb-2 hidden group-focus-within/dl:flex flex-col bg-zinc-900 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-20 min-w-[155px]">
-                                    <button
-                                      onClick={async () => {
-                                        try {
-                                          const res = await fetch(`${API_URL}/pedidos/${v.id}/comprobante?doble=false`, { headers: { Authorization: `Bearer ${token}` } });
-                                          if (res.ok) {
-                                            const blob = await res.blob();
-                                            const url = window.URL.createObjectURL(blob);
-                                            const a = document.createElement("a");
-                                            a.href = url; a.download = `Remito_${v.id}.pdf`;
-                                            document.body.appendChild(a); a.click(); a.remove();
-                                            window.URL.revokeObjectURL(url);
-                                          } else alert("Error al descargar");
-                                        } catch { alert("Error de conexión"); }
-                                      }}
-                                      className="px-3 py-2 text-xs text-left hover:bg-white/10 text-zinc-300 transition-colors">
-                                      📄 Simple
-                                    </button>
-                                    <button
-                                      onClick={async () => {
-                                        try {
-                                          const res = await fetch(`${API_URL}/pedidos/${v.id}/comprobante?doble=true`, { headers: { Authorization: `Bearer ${token}` } });
-                                          if (res.ok) {
-                                            const blob = await res.blob();
-                                            const url = window.URL.createObjectURL(blob);
-                                            const a = document.createElement("a");
-                                            a.href = url; a.download = `Remito_Doble_${v.id}.pdf`;
-                                            document.body.appendChild(a); a.click(); a.remove();
-                                            window.URL.revokeObjectURL(url);
-                                          } else alert("Error al descargar");
-                                        } catch { alert("Error de conexión"); }
-                                      }}
-                                      className="px-3 py-2 text-xs text-left hover:bg-white/10 text-zinc-300 border-t border-white/5 transition-colors">
-                                      📄📄 Doble
-                                    </button>
-                                  </div>
+                                <div className="flex items-center gap-2 truncate">
+                                  <p className="text-sm font-semibold truncate text-white">{v.customer}</p>
+                                  {isSalida && (
+                                    <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold shrink-0 ${
+                                      !v.impacta_caja 
+                                        ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                                        : "bg-red-500/20 text-red-300 border border-red-500/30"
+                                    }`}>
+                                      {!v.impacta_caja ? "Sin impacto" : "Salida caja"}
+                                    </span>
+                                  )}
                                 </div>
+                                {!isSalida && !isCobro && (
+                                  <div className="relative group/dl" onClick={e => e.stopPropagation()}>
+                                    <button
+                                      className="p-1.5 bg-white/10 rounded-md hover:bg-white/20 transition-colors shrink-0"
+                                      title="Descargar Comprobante"
+                                    >
+                                      <Download className="w-3.5 h-3.5 text-zinc-300" />
+                                    </button>
+                                    <div className="absolute bottom-full right-0 mb-2 hidden group-focus-within/dl:flex flex-col bg-zinc-900 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-20 min-w-[155px]">
+                                      <button
+                                        onClick={async () => {
+                                          try {
+                                            const res = await fetch(`${API_URL}/pedidos/${v.id}/comprobante?doble=false`, { headers: { Authorization: `Bearer ${token}` } });
+                                            if (res.ok) {
+                                              const blob = await res.blob();
+                                              const url = window.URL.createObjectURL(blob);
+                                              const a = document.createElement("a");
+                                              a.href = url; a.download = `Remito_${v.id}.pdf`;
+                                              document.body.appendChild(a); a.click(); a.remove();
+                                              window.URL.revokeObjectURL(url);
+                                            } else alert("Error al descargar");
+                                          } catch { alert("Error de conexión"); }
+                                        }}
+                                        className="px-3 py-2 text-xs text-left hover:bg-white/10 text-zinc-300 transition-colors">
+                                        📄 Simple
+                                      </button>
+                                      <button
+                                        onClick={async () => {
+                                          try {
+                                            const res = await fetch(`${API_URL}/pedidos/${v.id}/comprobante?doble=true`, { headers: { Authorization: `Bearer ${token}` } });
+                                            if (res.ok) {
+                                              const blob = await res.blob();
+                                              const url = window.URL.createObjectURL(blob);
+                                              const a = document.createElement("a");
+                                              a.href = url; a.download = `Remito_Doble_${v.id}.pdf`;
+                                              document.body.appendChild(a); a.click(); a.remove();
+                                              window.URL.revokeObjectURL(url);
+                                            } else alert("Error al descargar");
+                                          } catch { alert("Error de conexión"); }
+                                        }}
+                                        className="px-3 py-2 text-xs text-left hover:bg-white/10 text-zinc-300 border-t border-white/5 transition-colors">
+                                        📄📄 Doble
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
-                              <p className="text-xs text-zinc-400 mt-0.5">
-                                {isCobro
-                                  ? `${v.hora} · Cobro · Efectivo`
-                                  : `${v.hora} · ${v.tipo === "pedido" ? "Pedido" : "Venta"} · ${v.forma_pago || 'Efectivo'}`
+                              <p className="text-xs text-zinc-400 mt-0.5 truncate">
+                                {isSalida
+                                  ? `${v.hora} · ${v.tipo === 'pago_proveedor' ? 'Pago a Proveedor' : 'Salida'} · ${v.forma_pago || 'Efectivo'}${v.descripcion ? ` · ${v.descripcion}` : ''}`
+                                  : isCobro
+                                    ? `${v.hora} · Cobro · Efectivo`
+                                    : `${v.hora} · ${v.tipo === "pedido" ? "Pedido" : "Venta"} · ${v.forma_pago || 'Efectivo'}`
                                 }
                               </p>
                             </div>
                             <div className="text-right shrink-0">
-                              <p className={`text-sm font-bold ${isCobro ? "text-emerald-400" : "text-white"}`}>
-                                {isCobro ? "+" : ""}${v.total > 0 ? v.total.toLocaleString('es-AR') : v.pago.toLocaleString('es-AR')}
+                              <p className={`text-sm font-bold ${
+                                isSalida ? "text-amber-400" :
+                                isCobro ? "text-emerald-400" : "text-white"
+                              }`}>
+                                {isSalida ? "-" : isCobro ? "+" : ""}${((isSalida || isCobro) ? v.pago : (v.total > 0 ? v.total : v.pago)).toLocaleString('es-AR')}
                               </p>
-                              {isCobro ? (
+                              {isSalida ? (
+                                <p className={`text-xs font-semibold ${!v.impacta_caja ? "text-amber-400" : "text-red-400"}`}>
+                                  {!v.impacta_caja ? "Sin impacto" : "Salida"}
+                                </p>
+                              ) : isCobro ? (
                                 <p className="text-xs text-emerald-500 font-semibold">Cobrado</p>
                               ) : (
                                 v.saldo > 0
@@ -6477,7 +6801,7 @@ export default function BakeryDriverApp() {
         </main>
 
         {/* ── Bottom Bar POS / Mayorista ── */}
-        {((!isClienteMayorista && activeTab === "pos") || (isClienteMayorista && activeTab === "cargar_pedido")) && (
+        {((!isClienteMayorista && activeTab === "pos" && !isVendedor && (!isAdmin || adminPosMode !== "mostrador")) || (isClienteMayorista && activeTab === "cargar_pedido")) && (
           <div className={`fixed bottom-24 md:bottom-8 left-1/2 md:left-[calc(50%+8rem)] z-20 w-[calc(100%-2rem)] max-w-md md:max-w-[calc(100%-18rem)] xl:max-w-6xl -translate-x-1/2 rounded-3xl border border-white/10 bg-black/80 p-4 backdrop-blur-2xl transition-all duration-300 ${
             Number(cartTotal) > 0 ? "scale-100 opacity-100 shadow-2xl shadow-brand-red/20" : "scale-95 opacity-80"
           }`}>
@@ -6544,7 +6868,7 @@ export default function BakeryDriverApp() {
                     <NavButton icon={Truck}        label="Pedidos" value="pedidos" badge={deliveries.filter(d => d.status === "Late").length} />
                     {!isVendedor && <NavButton icon={Package} label="Stock" value="stock" />}
                     <NavButton icon={ShoppingCart} label="Venta"   value="pos" prominent />
-                    {!isVendedor && <NavButton icon={Users}        label="Clientes" value="clientes" />}
+                    {!isVendedor && <NavButton icon={Users}        label="Personas" value="clientes" />}
                     <NavButton icon={Receipt}      label="Historial" value="ventas" />
                   </>
                 )}
@@ -6554,6 +6878,7 @@ export default function BakeryDriverApp() {
                     {!isProduccion && <div className="w-[1px] h-10 bg-white/10 mx-2"></div>}
                     <NavButton icon={Warehouse}    label="Depósito" value="deposito" badge={depositoReservasPendientes.length} />
                     {isAdmin && <NavButton icon={ClipboardList} label="Materias" value="materias" />}
+                    {isAdmin && <NavButton icon={ShoppingCart} label="Compras" value="compras" />}
                     <NavButton icon={CheckCircle2} label="Recetas" value="recetas" />
                     {isAdmin && <NavButton icon={Truck}        label="Despacho" value="despacho" />}
                     {isAdmin && <NavButton icon={UserIcon}     label="Usuarios" value="usuarios" />}
@@ -6630,6 +6955,37 @@ export default function BakeryDriverApp() {
           onSuccess={() => {
             setPaymentClient(null);
             fetchAllData(token!, false);
+          }}
+        />
+      )}
+
+      {/* ── Proveedor Detalle Modal ── */}
+      {proveedorDetalle && (
+        <ProveedorDetalleModal
+          proveedor={proveedorDetalle}
+          token={token!}
+          apiUrl={API_URL}
+          onClose={() => setProveedorDetalle(null)}
+          onCargarPago={(p) => {
+            setProveedorDetalle(null);
+            setPaymentProveedor(p);
+          }}
+        />
+      )}
+
+      {/* ── Cargar Pago Proveedor Modal ── */}
+      {paymentProveedor && (
+        <CargarPagoProveedorModal
+          proveedor={paymentProveedor}
+          token={token!}
+          apiUrl={API_URL}
+          onClose={() => setPaymentProveedor(null)}
+          onSuccess={() => {
+            setPaymentProveedor(null);
+            fetchProveedores();
+            fetchAllData(token!, false);
+            fetchCajaTurno();
+            setHistoryRefresh(prev => prev + 1);
           }}
         />
       )}
@@ -6816,6 +7172,7 @@ export default function BakeryDriverApp() {
                 <div className="space-y-3">
                   {cajaSales.map(v => {
                     const isCobro = v.tipo === "cobro_cuenta";
+                    const isSalida = v.tipo === "pago_proveedor" || v.tipo === "salida" || (typeof v.tipo === "string" && v.tipo.startsWith("pago_"));
                     return (
                       <div
                         key={v.id}
@@ -6828,27 +7185,38 @@ export default function BakeryDriverApp() {
                           <div className="flex-1 min-w-0 pr-2">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold uppercase ${
-                                isCobro 
-                                  ? "bg-emerald-500/20 text-emerald-300"
-                                  : v.tipo === "pedido"
-                                    ? "bg-purple-500/20 text-purple-300"
-                                    : "bg-blue-500/20 text-blue-300"
+                                isSalida
+                                  ? (!v.impacta_caja ? "bg-amber-500/20 text-amber-300 border border-amber-500/30" : "bg-red-500/20 text-red-300 border border-red-500/30")
+                                  : isCobro 
+                                    ? "bg-emerald-500/20 text-emerald-300"
+                                    : v.tipo === "pedido"
+                                      ? "bg-purple-500/20 text-purple-300"
+                                      : "bg-blue-500/20 text-blue-300"
                               }`}>
-                                {isCobro ? "Cobro" : v.tipo === "pedido" ? "Pedido" : "Venta"}
+                                {isSalida ? (!v.impacta_caja ? "Sin impacto" : "Salida") : isCobro ? "Cobro" : v.tipo === "pedido" ? "Pedido" : "Venta"}
                               </span>
                               <span className="text-xs text-zinc-400">{v.hora} hs</span>
                             </div>
                             <p className="text-sm font-semibold text-white mt-1.5 truncate">{v.customer}</p>
                           </div>
                           <div className="text-right shrink-0">
-                            <p className="text-sm font-bold text-white">${(isCobro ? v.pago : v.total).toLocaleString('es-AR')}</p>
-                            {!isCobro && v.saldo > 0 && <p className="text-xs text-red-400">Debe ${v.saldo.toLocaleString('es-AR')}</p>}
-                            {!isCobro && v.saldo === 0 && <p className="text-xs text-emerald-400">Pagado</p>}
+                            <p className={`text-sm font-bold ${isSalida ? "text-amber-400" : isCobro ? "text-emerald-400" : "text-white"}`}>
+                              {isSalida ? "-" : isCobro ? "+" : ""}${((isSalida || isCobro) ? v.pago : (v.total > 0 ? v.total : v.pago)).toLocaleString('es-AR')}
+                            </p>
+                            {isSalida ? (
+                              <p className={`text-xs font-semibold ${!v.impacta_caja ? "text-amber-400" : "text-red-400"}`}>
+                                {!v.impacta_caja ? "Sin impacto" : "Salida caja"}
+                              </p>
+                            ) : !isCobro && v.saldo > 0 ? (
+                              <p className="text-xs text-red-400">Debe ${v.saldo.toLocaleString('es-AR')}</p>
+                            ) : !isCobro && v.saldo === 0 ? (
+                              <p className="text-xs text-emerald-400">Pagado</p>
+                            ) : null}
                           </div>
                         </div>
                         <div className="mt-2 flex items-center gap-2 flex-wrap">
                           <span className="text-[10px] bg-white/5 border border-white/10 rounded-lg px-2 py-0.5 text-zinc-400 uppercase">{v.forma_pago || 'Efectivo'}</span>
-                          {v.pago > 0 && <span className="text-[10px] bg-white/5 border border-white/10 rounded-lg px-2 py-0.5 text-zinc-400">Pagó ${v.pago.toLocaleString('es-AR')}</span>}
+                          {v.pago > 0 && <span className="text-[10px] bg-white/5 border border-white/10 rounded-lg px-2 py-0.5 text-zinc-400">{isSalida ? 'Monto' : 'Pagó'} ${v.pago.toLocaleString('es-AR')}</span>}
                         </div>
                       </div>
                     );
@@ -6869,13 +7237,41 @@ export default function BakeryDriverApp() {
               <div>
                 <h3 className="text-lg font-bold text-white">{selectedVenta.customer}</h3>
                 <p className="text-xs text-zinc-400 mt-0.5">
-                  {selectedVenta.hora} &middot; {selectedVenta.tipo === 'cobro_cuenta' ? 'Cobro' : selectedVenta.tipo === 'pedido' ? 'Pedido' : 'Venta'} &middot; {selectedVenta.forma_pago || 'Efectivo'}
+                  {selectedVenta.hora} &middot; {
+                    selectedVenta.tipo === 'pago_proveedor' ? 'Pago a Proveedor' :
+                    selectedVenta.tipo === 'salida' ? 'Salida de Caja' :
+                    selectedVenta.tipo === 'cobro_cuenta' ? 'Cobro' :
+                    selectedVenta.tipo === 'pedido' ? 'Pedido' : 'Venta'
+                  } &middot; {selectedVenta.forma_pago || 'Efectivo'}
                 </p>
               </div>
               <button onClick={() => setSelectedVenta(null)} className="p-2 bg-white/5 hover:bg-white/10 rounded-xl transition-colors">
                 <X className="w-4 h-4 text-zinc-400" />
               </button>
             </div>
+
+            {/* Impact badge for salida / pago proveedor */}
+            {(selectedVenta.tipo === 'pago_proveedor' || selectedVenta.tipo === 'salida' || (typeof selectedVenta.tipo === 'string' && selectedVenta.tipo.startsWith('pago_'))) && (
+              <div className="mb-4">
+                {!selectedVenta.impacta_caja ? (
+                  <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center gap-2 text-amber-300 text-xs font-semibold">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>Este pago se registró <b>Sin impacto en caja física</b> (no afecta el arqueo de efectivo).</span>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-2xl bg-red-500/10 border border-red-500/30 flex items-center gap-2 text-red-300 text-xs font-semibold">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>Este pago <b>Impactó en caja física</b> (descontado del efectivo de caja).</span>
+                  </div>
+                )}
+                {selectedVenta.descripcion && (
+                  <div className="mt-2 p-3 rounded-xl bg-white/5 border border-white/5 text-xs text-zinc-300">
+                    <span className="text-zinc-500 block text-[10px] uppercase tracking-wider mb-0.5 font-bold">Nota / Referencia:</span>
+                    {selectedVenta.descripcion}
+                  </div>
+                )}
+              </div>
+            )}
 
             {selectedVenta.items && selectedVenta.items.length > 0 ? (
               <div className="space-y-2 mb-4 max-h-60 overflow-y-auto">
@@ -6890,15 +7286,30 @@ export default function BakeryDriverApp() {
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-zinc-500 mb-4">{selectedVenta.tipo === 'cobro_cuenta' ? 'Cobro de cuenta corriente.' : 'Sin detalle de items disponible.'}</p>
+              <p className="text-sm text-zinc-500 mb-4">
+                {selectedVenta.tipo === 'pago_proveedor' ? 'Pago registrado contra saldo de facturas de compras.' :
+                 selectedVenta.tipo === 'salida' ? 'Salida de dinero registrada.' :
+                 selectedVenta.tipo === 'cobro_cuenta' ? 'Cobro de cuenta corriente.' : 'Sin detalle de items disponible.'}
+              </p>
             )}
 
             <div className="space-y-2 pt-3 border-t border-white/10">
               <div className="flex justify-between text-sm">
-                <span className="text-zinc-400">Total</span>
-                <span className="font-bold text-white">${(selectedVenta.total || selectedVenta.pago).toLocaleString('es-AR')}</span>
+                <span className="text-zinc-400">
+                  {(selectedVenta.tipo === 'pago_proveedor' || selectedVenta.tipo === 'salida' || (typeof selectedVenta.tipo === 'string' && selectedVenta.tipo.startsWith('pago_')))
+                    ? 'Monto del Pago (Salida)'
+                    : 'Total'
+                  }
+                </span>
+                <span className={`font-bold ${
+                  (selectedVenta.tipo === 'pago_proveedor' || selectedVenta.tipo === 'salida' || (typeof selectedVenta.tipo === 'string' && selectedVenta.tipo.startsWith('pago_')))
+                    ? 'text-amber-400'
+                    : 'text-white'
+                }`}>
+                  {(selectedVenta.tipo === 'pago_proveedor' || selectedVenta.tipo === 'salida' || (typeof selectedVenta.tipo === 'string' && selectedVenta.tipo.startsWith('pago_'))) ? '-' : ''}${((selectedVenta.tipo === 'cobro_cuenta' || selectedVenta.tipo === 'pago_proveedor' || selectedVenta.tipo === 'salida') ? selectedVenta.pago : (selectedVenta.total || selectedVenta.pago)).toLocaleString('es-AR')}
+                </span>
               </div>
-              {selectedVenta.pago > 0 && selectedVenta.tipo !== 'cobro_cuenta' && (
+              {selectedVenta.pago > 0 && selectedVenta.tipo !== 'cobro_cuenta' && selectedVenta.tipo !== 'pago_proveedor' && selectedVenta.tipo !== 'salida' && !selectedVenta.tipo?.startsWith('pago_') && (
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-400">Pagado</span>
                   <span className="font-bold text-emerald-400">${selectedVenta.pago.toLocaleString('es-AR')}</span>
@@ -6906,34 +7317,38 @@ export default function BakeryDriverApp() {
               )}
               {selectedVenta.saldo > 0 && (
                 <div className="flex justify-between text-sm">
-                  <span className="text-zinc-400">Saldo deudor</span>
+                  <span className="text-zinc-400">
+                    {selectedVenta.tipo === 'pago_proveedor' ? 'Saldo restante del proveedor' : 'Saldo deudor'}
+                  </span>
                   <span className="font-bold text-red-400">${selectedVenta.saldo.toLocaleString('es-AR')}</span>
                 </div>
               )}
             </div>
 
-            <div className="flex flex-col gap-3 mt-4">
-              <label className="flex items-center justify-center gap-2 cursor-pointer text-zinc-300">
-                <input type="checkbox" checked={imprimirDoble} onChange={(e) => setImprimirDoble(e.target.checked)} className="rounded border-zinc-700 bg-zinc-800 text-brand-red focus:ring-brand-red" />
-                <span className="text-sm">Imprimir 2 copias por hoja (Remito)</span>
-              </label>
-              <button
-                onClick={async () => {
-                  try {
-                    const res = await fetch(`${API_URL}/pedidos/${selectedVenta.id}/comprobante?doble=${imprimirDoble}`, { headers: { Authorization: `Bearer ${token}` } });
-                    if (res.ok) {
-                      const blob = await res.blob();
-                      const url = window.URL.createObjectURL(blob);
-                      const a = document.createElement("a"); a.href = url; a.download = `Comprobante_${selectedVenta.id}.pdf`;
-                      document.body.appendChild(a); a.click(); document.body.removeChild(a); window.URL.revokeObjectURL(url);
-                    } else alert("Error al descargar");
-                  } catch { alert("Error de conexi\u00f3n"); }
-                }}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-brand-red text-white font-bold text-sm hover:bg-red-600 transition-colors active:scale-95"
-              >
-                <Download className="w-4 h-4" /> Descargar Comprobante
-              </button>
-            </div>
+            {selectedVenta.tipo !== 'pago_proveedor' && selectedVenta.tipo !== 'salida' && !selectedVenta.tipo?.startsWith('pago_') && selectedVenta.tipo !== 'cobro_cuenta' && (
+              <div className="flex flex-col gap-3 mt-4">
+                <label className="flex items-center justify-center gap-2 cursor-pointer text-zinc-300">
+                  <input type="checkbox" checked={imprimirDoble} onChange={(e) => setImprimirDoble(e.target.checked)} className="rounded border-zinc-700 bg-zinc-800 text-brand-red focus:ring-brand-red" />
+                  <span className="text-sm">Imprimir 2 copias por hoja (Remito)</span>
+                </label>
+                <button
+                  onClick={async () => {
+                    try {
+                      const res = await fetch(`${API_URL}/pedidos/${selectedVenta.id}/comprobante?doble=${imprimirDoble}`, { headers: { Authorization: `Bearer ${token}` } });
+                      if (res.ok) {
+                        const blob = await res.blob();
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement("a"); a.href = url; a.download = `Comprobante_${selectedVenta.id}.pdf`;
+                        document.body.appendChild(a); a.click(); document.body.removeChild(a); window.URL.revokeObjectURL(url);
+                      } else alert("Error al descargar");
+                    } catch { alert("Error de conexi\u00f3n"); }
+                  }}
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-brand-red text-white font-bold text-sm hover:bg-red-600 transition-colors active:scale-95"
+                >
+                  <Download className="w-4 h-4" /> Descargar Comprobante
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -441,8 +441,10 @@ export default function DespachoRepartidor({ repartidores, articulos, token, api
                   required
                   placeholder="0.00"
                   value={modalQty}
+                  onFocus={e => e.target.select()}
                   onChange={e => setModalQty(e.target.value)}
                   className="w-full h-12 bg-black/40 border border-white/10 rounded-xl px-4 text-white text-lg font-bold outline-none focus:border-brand-red text-center"
+                  style={{ appearance: 'textfield' }}
                 />
               </div>
 
@@ -561,16 +563,45 @@ export default function DespachoRepartidor({ repartidores, articulos, token, api
                             </button>
                           </div>
                         </div>
-                        <div className="shrink-0">
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const cur = parseFloat(bulkCart[a.id] || '0') || 0;
+                              const next = Math.max(0, cur - 1);
+                              setBulkCart({ ...bulkCart, [a.id]: next === 0 ? '' : String(next) });
+                            }}
+                            className="w-8 h-9 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white flex items-center justify-center font-bold text-sm transition-all active:scale-95 cursor-pointer border border-white/5"
+                            title="Restar 1"
+                          >
+                            -
+                          </button>
                           <input
-                            type="number"
-                            min="0"
-                            step="0.01"
+                            type="text"
+                            inputMode="decimal"
                             placeholder="0"
-                            value={bulkCart[a.id] || ''}
-                            onChange={e => setBulkCart({...bulkCart, [a.id]: e.target.value})}
-                            className="w-20 h-10 bg-white/5 border border-white/15 rounded-xl px-2 text-center text-emerald-400 font-bold outline-none focus:border-emerald-500 text-base"
+                            value={bulkCart[a.id] === '0' || !bulkCart[a.id] ? '' : bulkCart[a.id]}
+                            onFocus={e => e.target.select()}
+                            onChange={e => {
+                              const val = e.target.value.replace(/[^0-9.]/g, '');
+                              const cleanVal = val.replace(/^0+(?=\d)/, '');
+                              setBulkCart({ ...bulkCart, [a.id]: cleanVal });
+                            }}
+                            className="w-16 h-9 bg-white/5 border border-emerald-500/30 rounded-lg px-1 text-center text-emerald-400 font-black outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 text-sm transition-all"
+                            style={{ appearance: 'textfield' }}
                           />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const cur = parseFloat(bulkCart[a.id] || '0') || 0;
+                              const next = cur + 1;
+                              setBulkCart({ ...bulkCart, [a.id]: String(next) });
+                            }}
+                            className="w-8 h-9 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 flex items-center justify-center font-bold text-sm transition-all active:scale-95 cursor-pointer"
+                            title="Sumar 1"
+                          >
+                            +
+                          </button>
                         </div>
                       </div>
                     ))}
@@ -594,13 +625,18 @@ export default function DespachoRepartidor({ repartidores, articulos, token, api
                   </div>
                   <div className="flex gap-2">
                     <input 
-                      type="number" 
-                      value={cantidad}
-                      onChange={e => setCantidad(e.target.value)}
+                      type="text" 
+                      inputMode="decimal"
+                      value={cantidad === '0' || !cantidad ? '' : cantidad}
+                      onFocus={e => e.target.select()}
+                      onChange={e => {
+                        const val = e.target.value.replace(/[^0-9.]/g, '');
+                        const cleanVal = val.replace(/^0+(?=\d)/, '');
+                        setCantidad(cleanVal);
+                      }}
                       placeholder="Cant."
-                      min="0.01"
-                      step="0.01"
                       className="w-24 h-12 bg-black/40 border border-white/10 rounded-xl px-3 text-center text-emerald-300 outline-none focus:border-emerald-500 font-bold"
+                      style={{ appearance: 'textfield' }}
                     />
                     <button 
                       onClick={handleAdd}
