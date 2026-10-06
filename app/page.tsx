@@ -4603,7 +4603,7 @@ export default function BakeryDriverApp() {
                           <div className="flex items-center justify-between mt-1 pt-2 border-t border-white/5">
                             <div className="flex flex-col gap-0.5 text-[11px]">
                               <span className="text-zinc-400">En Repartidores: <b className="text-zinc-200">{totalRepartidores}</b></span>
-                              {faltan > 0 && <span className="text-red-400 font-semibold">Ã¢Å¡  Ã¯ ¸  Faltan {faltan} uds en móviles</span>}
+                              {faltan > 0 && <span className="text-red-400 font-semibold flex items-center gap-1"><AlertCircle className="w-3 h-3 inline shrink-0" /> Faltan {faltan} uds en móviles</span>}
                             </div>
                             
                             {faltan > 0 && prod && (
@@ -5328,7 +5328,7 @@ export default function BakeryDriverApp() {
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
               <div className="w-full max-w-md bg-zinc-900 border border-white/10 rounded-3xl p-6 space-y-4">
                 <div className="flex justify-between items-center">
-                  <h2 className="font-bold text-lg"> –¶ Ejecutar Receta</h2>
+                  <h2 className="font-bold text-lg">▶ Ejecutar Receta</h2>
                   <button onClick={() => setRecetaEjecutarModal(null)} className="text-zinc-400 hover:text-white"><X className="w-5 h-5" /></button>
                 </div>
                 <div className="bg-white/5 border border-white/10 rounded-xl p-3 space-y-1">
@@ -5699,7 +5699,7 @@ export default function BakeryDriverApp() {
             </div>
           )}
 
-          {/* ── DEPÃ“SITO ── */}
+          {/* ── DEPÓSITO ── */}
           {activeTab === "deposito" && (isAdmin || isProduccion) && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
@@ -5790,10 +5790,10 @@ export default function BakeryDriverApp() {
                               </div>
                             </div>
                             <div className="flex flex-col gap-1 text-[10px] text-zinc-500 border-t border-white/5 pt-2">
-                              <span>ðŸª Panadería: <strong className="text-zinc-300">{a.stock_panaderia}</strong></span>
+                              <span className="flex items-center gap-1.5"><Building2 className="w-3 h-3 text-amber-400 shrink-0" /><span>Panadería: <strong className="text-zinc-300">{a.stock_panaderia}</strong></span></span>
                               <div className="flex gap-2 flex-wrap">
                                 {Object.entries(a.stock_repartidores || {}).map(([id, rep]: [string, any]) => 
-                                  <span key={id}>Ã°Å¸Å¡  Rep {id}: <strong className="text-zinc-300">{rep.cantidad}</strong></span>
+                                  <span key={id} className="flex items-center gap-1"><Truck className="w-3 h-3 text-blue-400 shrink-0" /><span>Rep {id}: <strong className="text-zinc-300">{rep.cantidad}</strong></span></span>
                                 )}
                               </div>
                             </div>
@@ -6044,8 +6044,8 @@ export default function BakeryDriverApp() {
                         {depositoModal === 'entrada' ? '+ Registrar Entrada al Depósito' :
                          depositoModal === 'editar_entrada' ? 'Editar Entrada (ID: ' + depositoModalItem?.id + ')' :
                          depositoModal === 'distribuir' ? '→ Distribuir desde Depósito' :
-                         depositoModal === 'devolucion' ? 'Ã¢ €   Devolver al Depósito' :
-                         'Ã¢ €  €œ Salida de Materia Prima'}
+                         depositoModal === 'devolucion' ? '← Devolver al Depósito' :
+                         '🧪 Salida de Materia Prima'}
                       </h2>
                       <button onClick={() => setDepositoModal(null)} className="p-2 rounded-full bg-white/5 border border-white/10">
                         <X className="h-4 w-4 text-zinc-400" />
