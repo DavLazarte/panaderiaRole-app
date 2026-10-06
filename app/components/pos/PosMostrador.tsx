@@ -10,8 +10,10 @@ import {
 interface Product {
   id: number;
   name: string;
+  nombre?: string;
   price: number;
   quantity: number;
+  stock?: number;
   sold_qty?: number;
   codigo?: string;
   unidad_medida?: string;
@@ -19,6 +21,7 @@ interface Product {
   precio_unitario?: number;
   precio_reparto?: number;
   precio_bar?: number;
+  [key: string]: any;
 }
 
 interface Client {
