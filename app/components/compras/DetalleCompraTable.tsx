@@ -7,7 +7,7 @@ import {
 
 interface DetalleCompraTableProps {
   articulos: any[];
-  onUpdate: (index: number, field: string, value: any) => void;
+  onUpdate: (index: number, field: string | Record<string, any>, value?: any) => void;
   onRemove: (index: number) => void;
 }
 
@@ -103,6 +103,7 @@ export default function DetalleCompraTable({ articulos, onUpdate, onRemove }: De
                       type="text"
                       inputMode="decimal"
                       value={art.cantidad ?? '1'}
+                      onFocus={e => e.target.select()}
                       onChange={e => handleNumeric(idx, 'cantidad', e.target.value)}
                       placeholder="1"
                       className="w-16 h-8 px-2 rounded-lg bg-zinc-800/90 border border-white/10 text-white font-bold text-sm text-center focus:border-brand-red outline-none transition-colors"
@@ -117,6 +118,7 @@ export default function DetalleCompraTable({ articulos, onUpdate, onRemove }: De
                         type="text"
                         inputMode="decimal"
                         value={art.precio_compra ?? ''}
+                        onFocus={e => e.target.select()}
                         onChange={e => handleNumeric(idx, 'precio_compra', e.target.value)}
                         placeholder="0.00"
                         className="w-full h-8 pl-6 pr-2 rounded-lg bg-zinc-800/90 border border-white/10 text-white font-bold text-sm text-right focus:border-brand-red outline-none transition-colors"
@@ -190,6 +192,7 @@ export default function DetalleCompraTable({ articulos, onUpdate, onRemove }: De
                               <input
                                 type="text" inputMode="decimal"
                                 value={art.precio_venta ?? ''}
+                                onFocus={e => e.target.select()}
                                 onChange={e => handleNumeric(idx, 'precio_venta', e.target.value)}
                                 placeholder="0.00"
                                 className="w-full h-10 px-3 rounded-lg bg-emerald-950/40 border border-emerald-500/30 text-emerald-300 font-bold text-sm focus:border-emerald-400 outline-none transition-colors"
@@ -205,8 +208,8 @@ export default function DetalleCompraTable({ articulos, onUpdate, onRemove }: De
                               <select
                                 value={unidadBulto}
                                 onChange={e => {
-                                  onUpdate(idx, 'unidad_medida', e.target.value);
-                                  onUpdate(idx, 'unidad_compra', e.target.value);
+                                  const val = e.target.value;
+                                  onUpdate(idx, { unidad_medida: val, unidad_compra: val });
                                 }}
                                 className="w-full h-10 px-3 rounded-lg bg-zinc-800 border border-white/10 text-white font-bold text-sm focus:border-brand-red outline-none cursor-pointer"
                               >
@@ -221,10 +224,11 @@ export default function DetalleCompraTable({ articulos, onUpdate, onRemove }: De
                               <label className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Kilos / Litros por bulto (Presentación)</label>
                               <input
                                 type="text" inputMode="decimal"
-                                value={art.peso_unidad ?? art.peso ?? '25'}
+                                value={art.peso_unidad !== undefined ? art.peso_unidad : (art.peso ?? '')}
+                                onFocus={e => e.target.select()}
                                 onChange={e => {
-                                  handleNumeric(idx, 'peso_unidad', e.target.value);
-                                  handleNumeric(idx, 'peso', e.target.value);
+                                  const clean = e.target.value.replace(/[^0-9.,]/g, '');
+                                  onUpdate(idx, { peso_unidad: clean, peso: clean });
                                 }}
                                 placeholder="25"
                                 className="w-full h-10 px-3 rounded-lg bg-zinc-800 border border-white/10 text-white font-bold text-sm focus:border-brand-red outline-none transition-colors"

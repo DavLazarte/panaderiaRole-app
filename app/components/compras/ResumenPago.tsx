@@ -51,20 +51,19 @@ export default function ResumenPago({
           {/* Número de comprobante */}
           <div>
             <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider block mb-2">
-              Nº de Factura o Remito <span className="text-brand-red">*</span>
+              Nº de Factura o Remito <span className="text-zinc-500 font-normal lowercase">(opcional)</span>
             </label>
             <div className="relative">
               <Receipt className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 w-5 h-5" />
               <input 
                 type="text" 
-                required
                 value={numRecibo}
                 onChange={e => setNumRecibo(e.target.value)}
-                placeholder="Ej: FC-0001-00045892 o R-982"
+                placeholder="Ej: FC-0001-00045892 (opcional)"
                 className="w-full h-12 pl-12 pr-4 rounded-2xl bg-black/60 border border-white/10 text-white placeholder:text-zinc-600 font-semibold text-sm sm:text-base focus:border-brand-red outline-none transition-colors"
               />
             </div>
-            <span className="text-[11px] text-zinc-500 block mt-1">Identificador del comprobante entregado por el proveedor</span>
+            <span className="text-[11px] text-zinc-500 block mt-1">Identificador del comprobante entregado por el proveedor (opcional)</span>
           </div>
 
           {/* Formas de Pago */}

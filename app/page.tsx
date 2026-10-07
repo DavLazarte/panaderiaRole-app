@@ -3,11 +3,11 @@
 import React, { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import {
   ShoppingCart, Truck, Package, Users, Plus, Minus, Search,
-  CircleDollarSign, ClipboardList, ChevronRight, LogOut,
+  CircleDollarSign, ClipboardList, ChevronRight, ChevronLeft, Menu, LogOut,
   User as UserIcon, X, Check, Calendar, CheckCircle2,
   CreditCard, Banknote, Clock, Receipt, ArrowLeft,
   ChevronDown, AlertCircle, RefreshCw, Trash2, PieChart as PieChartIcon, BarChart3, Edit2, Download, Warehouse, Archive,
-  Building2
+  Building2, Eye, EyeOff
 } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 
@@ -1792,6 +1792,9 @@ export default function BakeryDriverApp() {
   }, [user, isProduccion, isClienteMayorista, activeTab]);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [categoriasModalOpen, setCategoriasModalOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileNavHidden, setMobileNavHidden] = useState(false);
+  const [remitoModalDelivery, setRemitoModalDelivery] = useState<Delivery | null>(null);
 
   const [isReordering, setIsReordering] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
@@ -3092,7 +3095,10 @@ export default function BakeryDriverApp() {
   }, [filteredEntregados]);
 
   const NavButton = ({ icon: Icon, label, value, prominent, badge }: any) => (
-    <button onClick={() => setActiveTab(value)}
+    <button onClick={() => {
+      setActiveTab(value);
+      if (value === 'deposito') fetchDeposito();
+    }}
       className={`flex flex-col items-center justify-center gap-1 transition-all duration-300 relative ${activeTab === value ? "text-brand-red" : "text-zinc-400"}`}>
       <div className={`flex items-center justify-center rounded-2xl transition-all duration-300 relative ${
         prominent
@@ -3149,6 +3155,31 @@ export default function BakeryDriverApp() {
     );
   };
 
+  const ItemPills = ({ itemsStr }: { itemsStr?: string }) => {
+    if (!itemsStr) return null;
+    const parts = itemsStr.split(/[•·]/).map(s => s.trim()).filter(Boolean);
+    return (
+      <div className="flex flex-wrap gap-1.5 mt-2">
+        {parts.map((part, idx) => {
+          const match = part.match(/^([\d.,]+(?:\s*(?:x|u|kg|g|paq|doc))?)\s+(.+)$/i);
+          if (match) {
+            return (
+              <span key={idx} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white/5 border border-white/10 text-xs text-zinc-200">
+                <strong className="text-brand-yellow font-bold">{match[1]}</strong>
+                <span className="text-zinc-300 font-medium">{match[2]}</span>
+              </span>
+            );
+          }
+          return (
+            <span key={idx} className="inline-flex items-center px-2.5 py-1 rounded-xl bg-white/5 border border-white/10 text-xs text-zinc-300">
+              {part}
+            </span>
+          );
+        })}
+      </div>
+    );
+  };
+
   // ── LOGIN ──
   if (!token || !user) {
     return (
@@ -3179,7 +3210,7 @@ export default function BakeryDriverApp() {
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(251,146,60,0.18),transparent_40%)]" />
 
         {/* Sidebar Desktop */}
-        <div className="hidden md:flex w-64 flex-col border-r border-white/10 bg-black/40 backdrop-blur-3xl z-30 h-full shrink-0">
+        <div className={`hidden md:flex ${sidebarCollapsed ? 'w-0 border-r-0 -translate-x-full overflow-hidden' : 'w-64 border-r'} flex-col border-white/10 bg-black/40 backdrop-blur-3xl z-30 h-full shrink-0 transition-all duration-300 relative`}>
           <div className="p-6 flex items-center justify-between border-b border-white/10">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 bg-brand-red/20 rounded-full flex items-center justify-center border border-brand-red/30">
@@ -3190,6 +3221,14 @@ export default function BakeryDriverApp() {
                 <p className="text-xs text-zinc-500">{user.roles?.[0]}</p>
               </div>
             </div>
+            <button
+              type="button"
+              onClick={() => setSidebarCollapsed(true)}
+              title="Guardar / ocultar menú"
+              className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-400 hover:text-white transition-all active:scale-95 cursor-pointer ml-auto"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
           </div>
           <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
             {isClienteMayorista ? (
@@ -3207,12 +3246,12 @@ export default function BakeryDriverApp() {
               </>
             ) : (
               <>
+                <button onClick={() => setActiveTab('pedidos')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'pedidos' ? 'bg-brand-red/20 text-brand-yellow font-bold' : 'hover:bg-white/5 text-zinc-400'} text-sm`}>
+                  <Truck className="w-5 h-5"/> <span className="font-semibold text-sm">Pedidos</span>
+                  {deliveries.filter(d => d.status === "Late").length > 0 && <span className="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">{deliveries.filter(d => d.status === "Late").length}</span>}
+                </button>
                 {!isProduccion && (
                   <>
-                    <button onClick={() => setActiveTab('pedidos')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'pedidos' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
-                      <Truck className="w-5 h-5"/> <span className="font-semibold text-sm">Pedidos</span>
-                      {deliveries.filter(d => d.status === "Late").length > 0 && <span className="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">{deliveries.filter(d => d.status === "Late").length}</span>}
-                    </button>
                     {!isVendedor && (
                       <button onClick={() => setActiveTab('stock')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'stock' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Package className="w-5 h-5"/> <span className="font-semibold text-sm">Stock</span></button>
                     )}
@@ -3240,7 +3279,7 @@ export default function BakeryDriverApp() {
                     <ShoppingCart className="w-5 h-5"/> <span className="font-semibold text-sm">Compras</span>
                   </button>
                 )}
-                {(isAdmin || isProduccion) && (
+                {isAdmin && (
                   <button onClick={() => { setActiveTab('recetas'); fetchRecetas(recetaSearch); fetchMateriaPrimas(1, ''); fetchDeposito(); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'recetas' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
                     <CheckCircle2 className="w-5 h-5"/> <span className="font-semibold text-sm">Recetas</span>
                   </button>
@@ -3264,23 +3303,58 @@ export default function BakeryDriverApp() {
         </div>
 
         <div className="flex-1 flex flex-col relative w-full min-w-0 h-full">
-        {/* Header Mobile */}
-        <div className="md:hidden flex items-center justify-between px-4 pt-5 pb-2 relative z-10">
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 bg-brand-red/20 rounded-full flex items-center justify-center border border-brand-red/30">
-              <UserIcon className="h-4 w-4 text-brand-yellow" />
+          {/* Botón flotante para restaurar menú en Desktop cuando está colapsado */}
+          {sidebarCollapsed && (
+            <div className="hidden md:block absolute top-3 left-4 z-40">
+              <button
+                type="button"
+                onClick={() => setSidebarCollapsed(false)}
+                title="Mostrar menú lateral"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-zinc-950/90 hover:bg-zinc-900 border border-white/15 text-zinc-300 hover:text-white transition-all shadow-xl backdrop-blur-md active:scale-95 text-xs font-semibold cursor-pointer"
+              >
+                <ChevronRight className="w-4 h-4 text-brand-yellow" />
+                <span>Menú</span>
+              </button>
             </div>
-            <div>
-              <p className="text-sm font-bold leading-tight">{user.name}</p>
-              <p className="text-xs text-zinc-500">{isClienteMayorista ? "Cliente Mayorista" : `Van #${user.vehiculo} · ${user.roles[0]}`}</p>
+          )}
+
+          {/* Header Mobile */}
+          <div className="md:hidden flex items-center justify-between px-4 pt-5 pb-2 relative z-10">
+            <div className="flex items-center gap-3">
+              <div className="h-9 w-9 bg-brand-red/20 rounded-full flex items-center justify-center border border-brand-red/30">
+                <UserIcon className="h-4 w-4 text-brand-yellow" />
+              </div>
+              <div>
+                <p className="text-sm font-bold leading-tight">{user.name}</p>
+                <p className="text-xs text-zinc-500 capitalize">
+                  {isClienteMayorista 
+                    ? "Cliente Mayorista" 
+                    : user.vehiculo 
+                      ? `Móvil #${user.vehiculo} · ${user.roles?.[0] || ''}` 
+                      : (user.roles?.[0] || 'Usuario')}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setMobileNavHidden(prev => !prev)}
+                title={mobileNavHidden ? "Mostrar barra de navegación" : "Guardar barra de navegación"}
+                className={`p-2 rounded-full border transition-all ${
+                  mobileNavHidden 
+                    ? "bg-brand-red/20 border-brand-red/40 text-brand-yellow" 
+                    : "bg-white/5 border-white/10 text-zinc-400 hover:text-white"
+                }`}
+              >
+                {mobileNavHidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+              </button>
+              <button onClick={logout} className="p-2 bg-white/5 rounded-full border border-white/10">
+                <LogOut className="h-4 w-4 text-red-400" />
+              </button>
             </div>
           </div>
-          <button onClick={logout} className="p-2 bg-white/5 rounded-full border border-white/10">
-            <LogOut className="h-4 w-4 text-red-400" />
-          </button>
-        </div>
 
-        <main className="flex-1 overflow-y-auto px-4 pb-40 pt-3 relative z-10">
+          <main className={`flex-1 overflow-y-auto px-4 ${mobileNavHidden ? 'pb-12' : 'pb-40'} pt-3 relative`}>
 
           {/* ── CLIENTE MAYORISTA: CARGAR PEDIDO ── */}
           {isClienteMayorista && activeTab === "cargar_pedido" && (
@@ -3804,7 +3878,7 @@ export default function BakeryDriverApp() {
                       )}
                     </div>
 
-                    <div className="flex gap-2 md:col-span-5 overflow-x-auto pb-1 md:pb-0">
+                    <div className="grid grid-cols-3 gap-2 md:col-span-5">
                       {[
                         { id: "Today", label: "Hoy", count: deliveries.filter(d => d.status === "Today").length },
                         { id: "Late",  label: "Atrasados", count: deliveries.filter(d => d.status === "Late").length },
@@ -3813,7 +3887,7 @@ export default function BakeryDriverApp() {
                         <button
                           key={f.id}
                           onClick={() => setDeliveryFilter(f.id)}
-                          className={`flex-1 min-w-[90px] h-11 rounded-2xl px-3 text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+                          className={`h-11 rounded-2xl px-2 sm:px-3 text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
                             deliveryFilter === f.id
                               ? "bg-brand-red text-white shadow-lg shadow-brand-red/20"
                               : "border border-white/10 bg-white/5 text-zinc-400 hover:text-white"
@@ -3887,82 +3961,88 @@ export default function BakeryDriverApp() {
                   )}
 
                   {/* Métricas rápidas de pedidos pendientes */}
-                  <div className="flex flex-wrap items-center justify-between gap-3 text-xs font-semibold text-zinc-400 bg-black/20 border border-white/5 px-4 py-2.5 rounded-2xl">
-                    <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
-                      <span>📦 <b>{filteredDeliveries.length}</b> {filteredDeliveries.length === 1 ? 'pedido pendiente' : 'pedidos pendientes'}</span>
-                      {!isClienteMayorista && (
-                        <span>👥 <b>{groupedDeliveriesByClient.length}</b> {groupedDeliveriesByClient.length === 1 ? 'cliente' : 'clientes'}</span>
-                      )}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs font-semibold text-zinc-400 bg-black/20 border border-white/5 px-3.5 sm:px-4 py-2.5 rounded-2xl">
+                    <div className="flex items-center justify-between sm:justify-start gap-2.5 sm:gap-4 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <span>📦 <b>{filteredDeliveries.length}</b> {filteredDeliveries.length === 1 ? 'pedido pendiente' : 'pedidos pendientes'}</span>
+                        {!isClienteMayorista && (
+                          <>
+                            <span className="text-zinc-600">·</span>
+                            <span>👥 <b>{groupedDeliveriesByClient.length}</b> {groupedDeliveriesByClient.length === 1 ? 'cliente' : 'clientes'}</span>
+                          </>
+                        )}
+                      </div>
                       {!isClienteMayorista && pedidosViewMode === 'clientes' && groupedDeliveriesByClient.length > 0 && (
-                        <div className="flex items-center gap-1.5 border-l border-white/10 pl-3">
+                        <div className="flex items-center gap-1.5 border-l border-white/10 pl-2.5 ml-auto sm:ml-0">
                           <button
                             type="button"
                             onClick={() => collapseAllClients(groupedDeliveriesByClient.map(g => g.clientKey))}
-                            className="px-2 py-0.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-colors"
+                            className="px-2 py-0.5 rounded-lg bg-white/5 hover:bg-white/10 text-[11px] text-zinc-400 hover:text-white transition-colors"
                           >
-                            Colapsar todos
+                            Colapsar
                           </button>
                           <button
                             type="button"
                             onClick={() => expandAllClients(groupedDeliveriesByClient.map(g => g.clientKey))}
-                            className="px-2 py-0.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-colors"
+                            className="px-2 py-0.5 rounded-lg bg-white/5 hover:bg-white/10 text-[11px] text-zinc-400 hover:text-white transition-colors"
                           >
-                            Expandir todos
+                            Expandir
                           </button>
                         </div>
                       )}
                     </div>
-                    <span className="text-brand-yellow font-bold text-sm">
-                      Total: ${filteredDeliveries.reduce((acc, d) => acc + (d.total_raw || parseFloat(String(d.total).replace(/[^0-9.-]+/g, "")) || 0), 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                    </span>
+                    <div className="flex items-center justify-between sm:justify-end gap-2 border-t sm:border-t-0 border-white/5 pt-1.5 sm:pt-0">
+                      <span className="text-[11px] uppercase font-bold text-zinc-500 sm:hidden">Total Pendiente:</span>
+                      <span className="text-brand-yellow font-extrabold text-sm">
+                        Total: ${filteredDeliveries.reduce((acc, d) => acc + (d.total_raw || parseFloat(String(d.total).replace(/[^0-9.-]+/g, "")) || 0), 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
                   </div>
 
                   {/* Vista Agrupada por Cliente (Acordeón) */}
                   {(!isClienteMayorista && pedidosViewMode === 'clientes') ? (
-                    <div className="space-y-4">
+                    <div className="space-y-3 sm:space-y-4">
                       {groupedDeliveriesByClient.map(group => {
                         const isCollapsed = !!collapsedClients[group.clientKey];
                         return (
-                          <div key={group.clientKey} className="rounded-3xl border border-white/10 bg-white/5 overflow-hidden backdrop-blur-md transition-all shadow-xl hover:border-white/20">
+                          <div key={group.clientKey} className="rounded-2xl sm:rounded-3xl border border-white/10 bg-white/5 overflow-hidden backdrop-blur-md transition-all shadow-xl hover:border-white/20">
                             {/* Cabecera del Cliente (Click para expandir / contraer) */}
                             <div
                               onClick={() => toggleClientCollapse(group.clientKey)}
-                              className={`p-4 sm:p-5 bg-black/40 ${isCollapsed ? '' : 'border-b border-white/10'} flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer select-none hover:bg-white/[0.04] transition-colors`}
+                              className={`px-3.5 py-3 sm:px-5 sm:py-4 bg-black/40 ${isCollapsed ? '' : 'border-b border-white/10'} flex items-center justify-between gap-2.5 cursor-pointer select-none hover:bg-white/[0.04] transition-colors`}
                             >
-                              <div className="flex items-center gap-3">
-                                <div className="h-11 w-11 rounded-2xl bg-brand-red/20 border border-brand-red/30 flex items-center justify-center shrink-0">
-                                  <Users className="h-5 w-5 text-brand-yellow" />
+                              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                <div className="h-9 w-9 sm:h-11 sm:w-11 rounded-xl sm:rounded-2xl bg-brand-red/20 border border-brand-red/30 flex items-center justify-center shrink-0">
+                                  <Users className="h-4 w-4 sm:h-5 sm:w-5 text-brand-yellow" />
                                 </div>
-                                <div>
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <h2 className="text-base sm:text-lg font-bold text-white leading-tight">{group.customer}</h2>
-                                    <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-white/10 text-zinc-300 border border-white/10">
-                                      {group.orders.length} {group.orders.length === 1 ? 'pedido' : 'pedidos'}
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <h2 className="text-sm sm:text-base font-bold text-white truncate leading-tight">{group.customer}</h2>
+                                    <span className="text-[10px] sm:text-[11px] font-bold px-2 py-0.5 rounded-full bg-white/10 text-zinc-300 border border-white/10 shrink-0">
+                                      {group.orders.length} {group.orders.length === 1 ? 'ped.' : 'pedidos'}
                                     </span>
                                   </div>
-                                  <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400 mt-1">
-                                    {group.address && group.address !== 'Sin dirección' && (
-                                      <span className="flex items-center gap-1 text-zinc-300">
-                                        📍 {group.address}
-                                      </span>
-                                    )}
-                                    {group.telefono && (
-                                      <span className="flex items-center gap-1 text-zinc-400">
-                                        📞 {group.telefono}
-                                      </span>
-                                    )}
-                                  </div>
+                                  {((group.address && group.address !== 'Sin dirección') || group.telefono) && (
+                                    <div className="flex items-center gap-2 text-[11px] text-zinc-400 truncate mt-0.5">
+                                      {group.address && group.address !== 'Sin dirección' && (
+                                        <span className="truncate">📍 {group.address}</span>
+                                      )}
+                                      {group.telefono && (
+                                        <span className="shrink-0 text-zinc-500">📞 {group.telefono}</span>
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
                               </div>
 
-                              <div className="flex items-center justify-between sm:justify-end gap-4 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-white/5">
+                              <div className="flex items-center gap-2 sm:gap-3 shrink-0">
                                 <div className="text-right">
-                                  <p className="text-[10px] uppercase font-bold text-zinc-500">Total Cliente</p>
-                                  <p className="text-lg font-extrabold text-brand-yellow">
+                                  <p className="text-[9px] sm:text-[10px] uppercase font-bold text-zinc-500 leading-tight">Total</p>
+                                  <p className="text-sm sm:text-base font-extrabold text-brand-yellow leading-tight">
                                     ${group.totalAmount.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                                   </p>
                                 </div>
-                                <div className={`p-2 rounded-xl bg-white/5 text-zinc-400 hover:text-white transition-all duration-200 ${isCollapsed ? '-rotate-90' : 'rotate-0'}`}>
+                                <div className={`p-1.5 rounded-lg bg-white/5 text-zinc-400 hover:text-white transition-transform duration-200 ${isCollapsed ? '-rotate-90' : 'rotate-0'}`}>
                                   <ChevronDown className="h-4 w-4" />
                                 </div>
                               </div>
@@ -3970,102 +4050,68 @@ export default function BakeryDriverApp() {
 
                             {/* Pedidos del Cliente */}
                             {!isCollapsed && (
-                              <div className="p-3 sm:p-4 space-y-3 bg-black/10">
+                              <div className="p-2.5 sm:p-4 space-y-2.5 sm:space-y-3 bg-black/10">
                                 {group.orders.map(delivery => (
-                                  <div key={delivery.id} className="rounded-2xl border border-white/10 bg-zinc-900/60 p-3.5 sm:p-4 flex flex-col justify-between gap-3 hover:border-brand-red/40 transition-all">
-                                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                                  <div key={delivery.id} className="rounded-xl sm:rounded-2xl border border-white/10 bg-zinc-900/60 p-3 sm:p-4 flex flex-col justify-between gap-3 hover:border-brand-red/40 transition-all">
+                                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2.5">
                                       <div className="flex-1 min-w-0">
-                                        <div className="flex flex-wrap items-center gap-2">
-                                          <span className="text-sm font-bold text-white">Pedido #{delivery.id}</span>
+                                        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                                          <span className="text-xs sm:text-sm font-bold text-white">Pedido #{delivery.id}</span>
                                           <StatusBadge status={delivery.status} />
                                           <CreadorBadge creador={delivery.creador} />
                                           {delivery.fecha_entrega && (
-                                            <span className="text-[10px] font-bold tracking-wider text-brand-yellow bg-brand-red/10 px-2.5 py-0.5 rounded-full border border-brand-red/20">
+                                            <span className="text-[10px] font-bold tracking-wider text-brand-yellow bg-brand-red/10 px-2 py-0.5 rounded-full border border-brand-red/20">
                                               📅 ENTREGAR: {delivery.fecha_entrega.split('-').reverse().join('/')}
                                             </span>
                                           )}
                                         </div>
                                         {delivery.notas && (
-                                          <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-xl mt-2 inline-block">
+                                          <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-lg mt-1.5 inline-block">
                                             💬 {delivery.notas}
                                           </p>
                                         )}
-                                        <div className="mt-2 text-xs text-zinc-300 bg-black/30 rounded-xl px-3 py-2 border border-white/5 font-mono">
-                                          {delivery.items}
-                                        </div>
+                                        <ItemPills itemsStr={delivery.items} />
                                       </div>
 
-                                      <div className="sm:text-right shrink-0">
-                                        <p className="text-[10px] uppercase font-bold text-zinc-500">Total Pedido</p>
-                                        <p className="text-base sm:text-lg font-bold text-white">{delivery.total}</p>
+                                      <div className="flex items-center justify-between sm:flex-col sm:items-end shrink-0 pt-1.5 sm:pt-0 border-t sm:border-t-0 border-white/5">
+                                        <span className="text-[10px] uppercase font-bold text-zinc-500 sm:hidden">Total Pedido:</span>
+                                        <div className="text-right">
+                                          <p className="text-[10px] uppercase font-bold text-zinc-500 hidden sm:block">Total Pedido</p>
+                                          <p className="text-base sm:text-lg font-bold text-white">{delivery.total}</p>
+                                        </div>
                                       </div>
                                     </div>
 
                                     {/* Botones de acción */}
-                                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/5">
-                                      <div className="flex items-center gap-2">
+                                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/5">
+                                      <div className="flex items-center gap-1.5 sm:gap-2">
                                         <button onClick={() => handleCancelarPedido(delivery)} disabled={loadingActionId === delivery.id}
-                                          className="flex items-center justify-center rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2 hover:bg-red-500/20 active:scale-95 text-red-400 disabled:opacity-50 text-xs font-semibold"
+                                          className="flex items-center justify-center rounded-xl bg-red-500/10 border border-red-500/20 px-2.5 sm:px-3 py-2 hover:bg-red-500/20 active:scale-95 text-red-400 disabled:opacity-50 text-xs font-semibold"
                                           title="Eliminar pedido">
                                           {loadingActionId === delivery.id ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                                           <span className="hidden sm:inline ml-1.5">Eliminar</span>
                                         </button>
 
-                                        <div className="relative group">
-                                          <button disabled={loadingActionId === delivery.id}
-                                            className="flex items-center gap-1.5 rounded-xl bg-blue-500/10 border border-blue-500/20 px-3 py-2 hover:bg-blue-500/20 active:scale-95 text-blue-400 disabled:opacity-50 text-xs font-semibold"
-                                            title="Descargar remito">
-                                            <Download className="h-3.5 w-3.5" />
-                                            <span>Remito</span>
-                                          </button>
-                                          <div className="absolute bottom-full left-0 mb-2 hidden group-focus-within:flex flex-col bg-zinc-900 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-20 min-w-[160px]">
-                                            <button
-                                              onClick={async () => {
-                                                try {
-                                                  const res = await fetch(`${API_URL}/pedidos/${delivery.id}/comprobante?doble=false`, { headers: { Authorization: `Bearer ${token}` } });
-                                                  if (res.ok) {
-                                                    const blob = await res.blob();
-                                                    const url = window.URL.createObjectURL(blob);
-                                                    const a = document.createElement("a");
-                                                    a.href = url; a.download = `Remito_${delivery.id}.pdf`;
-                                                    document.body.appendChild(a); a.click(); a.remove();
-                                                    window.URL.revokeObjectURL(url);
-                                                  } else { alert("Error al descargar"); }
-                                                } catch { alert("Error de conexión"); }
-                                              }}
-                                              className="px-4 py-2.5 text-xs text-left hover:bg-white/10 text-zinc-300 transition-colors">
-                                              📄 Remito Simple
-                                            </button>
-                                            <button
-                                              onClick={async () => {
-                                                try {
-                                                  const res = await fetch(`${API_URL}/pedidos/${delivery.id}/comprobante?doble=true`, { headers: { Authorization: `Bearer ${token}` } });
-                                                  if (res.ok) {
-                                                    const blob = await res.blob();
-                                                    const url = window.URL.createObjectURL(blob);
-                                                    const a = document.createElement("a");
-                                                    a.href = url; a.download = `Remito_Doble_${delivery.id}.pdf`;
-                                                    document.body.appendChild(a); a.click(); a.remove();
-                                                    window.URL.revokeObjectURL(url);
-                                                  } else { alert("Error al descargar"); }
-                                                } catch { alert("Error de conexión"); }
-                                              }}
-                                              className="px-4 py-2.5 text-xs text-left hover:bg-white/10 text-zinc-300 border-t border-white/5 transition-colors">
-                                              📄📄 Remito Doble
-                                            </button>
-                                          </div>
-                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => setRemitoModalDelivery(delivery)}
+                                          disabled={loadingActionId === delivery.id}
+                                          className="flex items-center gap-1.5 rounded-xl bg-blue-500/10 border border-blue-500/20 px-2.5 sm:px-3 py-2 hover:bg-blue-500/20 active:scale-95 text-blue-400 disabled:opacity-50 text-xs font-semibold"
+                                          title="Descargar remito">
+                                          <Download className="h-3.5 w-3.5" />
+                                          <span>Remito</span>
+                                        </button>
                                       </div>
 
-                                      <div className="flex items-center gap-2 ml-auto">
+                                      <div className="flex items-center gap-1.5 sm:gap-2">
                                         <button onClick={() => handleEditarPedido(delivery)} disabled={loadingActionId === delivery.id}
-                                          className="flex items-center gap-1 rounded-xl bg-white/5 border border-white/10 px-3 py-2 text-xs font-semibold hover:bg-white/10 active:scale-95 text-zinc-300 disabled:opacity-50">
-                                          <Edit2 className="h-3.5 w-3.5" /> Editar
+                                          className="flex items-center gap-1 rounded-xl bg-white/5 border border-white/10 px-2.5 sm:px-3 py-2 text-xs font-semibold hover:bg-white/10 active:scale-95 text-zinc-300 disabled:opacity-50">
+                                          <Edit2 className="h-3.5 w-3.5" /> <span className="hidden xs:inline">Editar</span>
                                         </button>
                                         <button onClick={() => handleEntregarPedido(delivery)} disabled={loadingActionId === delivery.id}
-                                          className="flex items-center gap-1 rounded-xl bg-brand-red px-3.5 py-2 text-xs font-bold text-white shadow-lg shadow-brand-red/20 active:scale-95 disabled:opacity-50">
+                                          className="flex items-center gap-1 rounded-xl bg-brand-red px-3 sm:px-3.5 py-2 text-xs font-bold text-white shadow-lg shadow-brand-red/20 active:scale-95 disabled:opacity-50">
                                           {loadingActionId === delivery.id ? (
-                                            <><RefreshCw className="h-3.5 w-3.5 animate-spin" /> Cargando...</>
+                                            <><RefreshCw className="h-3.5 w-3.5 animate-spin" /> <span className="hidden xs:inline">Cargando...</span></>
                                           ) : (
                                             <>Cobrar <ChevronRight className="h-3.5 w-3.5" /></>
                                           )}
@@ -4082,22 +4128,24 @@ export default function BakeryDriverApp() {
                     </div>
                   ) : (
                     /* Vista Lista Tradicional (o vista cliente mayorista) */
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
                       {filteredDeliveries.map(delivery => (
-                        <div key={delivery.id} className="rounded-3xl border border-white/10 bg-white/5 p-4 flex flex-col justify-between hover:border-white/20 transition-all">
+                        <div key={delivery.id} className="rounded-2xl sm:rounded-3xl border border-white/10 bg-white/5 p-3.5 sm:p-4 flex flex-col justify-between gap-3 hover:border-white/20 transition-all">
                           <div>
                             <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <h3 className="text-base font-semibold">{delivery.customer}</h3>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                                  <h3 className="text-sm sm:text-base font-semibold truncate">{delivery.customer}</h3>
                                   <CreadorBadge creador={delivery.creador} />
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2 mt-1">
                                   <span className="text-xs font-bold text-zinc-300">#{delivery.id}</span>
-                                  <p className="text-xs text-zinc-400">· {delivery.address}</p>
+                                  {delivery.address && delivery.address !== 'Sin dirección' && (
+                                    <p className="text-xs text-zinc-400 truncate">· {delivery.address}</p>
+                                  )}
                                   {delivery.fecha_entrega && (
                                     <span className="text-[10px] font-semibold tracking-wider text-brand-yellow bg-brand-red/10 px-2 py-0.5 rounded-full border border-brand-red/20">
-                                      ENTREGAR: {delivery.fecha_entrega.split('-').reverse().join('/')}
+                                      📅 {delivery.fecha_entrega.split('-').reverse().join('/')}
                                     </span>
                                   )}
                                 </div>
@@ -4109,74 +4157,41 @@ export default function BakeryDriverApp() {
                               </div>
                               <StatusBadge status={delivery.status} />
                             </div>
-                            <div className="mt-2 rounded-xl bg-black/20 px-3 py-2 text-xs text-zinc-300">{delivery.items}</div>
+                            <ItemPills itemsStr={delivery.items} />
                           </div>
-                          <div className="mt-3 flex items-center justify-between">
+
+                          <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/5">
                             <div>
-                              <p className="text-xs text-zinc-500">Total</p>
-                              <p className="text-lg font-bold">{delivery.total}</p>
+                              <p className="text-[10px] uppercase font-bold text-zinc-500 leading-tight">Total</p>
+                              <p className="text-base sm:text-lg font-bold text-white leading-tight">{delivery.total}</p>
                             </div>
-                            <div className="flex gap-2">
+                            <div className="flex items-center gap-1.5 sm:gap-2">
                               <button onClick={() => handleCancelarPedido(delivery)} disabled={loadingActionId === delivery.id}
-                                className="flex items-center justify-center rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2.5 hover:bg-red-500/20 active:scale-95 text-red-400 disabled:opacity-50"
+                                className="flex items-center justify-center rounded-xl bg-red-500/10 border border-red-500/20 px-2.5 sm:px-3 py-2 hover:bg-red-500/20 active:scale-95 text-red-400 disabled:opacity-50 text-xs font-semibold"
                                 title="Eliminar pedido">
-                                {loadingActionId === delivery.id ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                                {loadingActionId === delivery.id ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                               </button>
-                              <div className="relative group">
-                                <button disabled={loadingActionId === delivery.id}
-                                  className="flex items-center justify-center rounded-xl bg-blue-500/10 border border-blue-500/20 px-3 py-2.5 hover:bg-blue-500/20 active:scale-95 text-blue-400 disabled:opacity-50"
-                                  title="Descargar remito">
-                                  <Download className="h-4 w-4" />
-                                </button>
-                                <div className="absolute bottom-full right-0 mb-2 hidden group-focus-within:flex flex-col bg-zinc-900 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-20 min-w-[160px]">
-                                  <button
-                                    onClick={async () => {
-                                      try {
-                                        const res = await fetch(`${API_URL}/pedidos/${delivery.id}/comprobante?doble=false`, { headers: { Authorization: `Bearer ${token}` } });
-                                        if (res.ok) {
-                                          const blob = await res.blob();
-                                          const url = window.URL.createObjectURL(blob);
-                                          const a = document.createElement("a");
-                                          a.href = url; a.download = `Remito_${delivery.id}.pdf`;
-                                          document.body.appendChild(a); a.click(); a.remove();
-                                          window.URL.revokeObjectURL(url);
-                                        } else { alert("Error al descargar"); }
-                                      } catch { alert("Error de conexión"); }
-                                    }}
-                                    className="px-4 py-2.5 text-sm text-left hover:bg-white/10 text-zinc-300 transition-colors">
-                                    📄 Remito Simple
-                                  </button>
-                                  <button
-                                    onClick={async () => {
-                                      try {
-                                        const res = await fetch(`${API_URL}/pedidos/${delivery.id}/comprobante?doble=true`, { headers: { Authorization: `Bearer ${token}` } });
-                                        if (res.ok) {
-                                          const blob = await res.blob();
-                                          const url = window.URL.createObjectURL(blob);
-                                          const a = document.createElement("a");
-                                          a.href = url; a.download = `Remito_Doble_${delivery.id}.pdf`;
-                                          document.body.appendChild(a); a.click(); a.remove();
-                                          window.URL.revokeObjectURL(url);
-                                        } else { alert("Error al descargar"); }
-                                      } catch { alert("Error de conexión"); }
-                                    }}
-                                    className="px-4 py-2.5 text-sm text-left hover:bg-white/10 text-zinc-300 border-t border-white/5 transition-colors">
-                                    📄📄 Remito Doble
-                                  </button>
-                                </div>
-                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setRemitoModalDelivery(delivery)}
+                                disabled={loadingActionId === delivery.id}
+                                className="flex items-center gap-1.5 rounded-xl bg-blue-500/10 border border-blue-500/20 px-2.5 sm:px-3 py-2 hover:bg-blue-500/20 active:scale-95 text-blue-400 disabled:opacity-50 text-xs font-semibold"
+                                title="Descargar remito">
+                                <Download className="h-3.5 w-3.5" />
+                                <span className="hidden sm:inline">Remito</span>
+                              </button>
                               {!isClienteMayorista && (
                                 <>
                                   <button onClick={() => handleEditarPedido(delivery)} disabled={loadingActionId === delivery.id}
-                                    className="flex items-center gap-1 rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm font-semibold hover:bg-white/10 active:scale-95 text-zinc-300 disabled:opacity-50">
-                                    Editar
+                                    className="flex items-center gap-1 rounded-xl bg-white/5 border border-white/10 px-2.5 sm:px-3 py-2 text-xs font-semibold hover:bg-white/10 active:scale-95 text-zinc-300 disabled:opacity-50">
+                                    <Edit2 className="h-3.5 w-3.5" /> <span className="hidden xs:inline">Editar</span>
                                   </button>
                                   <button onClick={() => handleEntregarPedido(delivery)} disabled={loadingActionId === delivery.id}
-                                    className="flex items-center gap-1 rounded-xl bg-brand-red px-4 py-2.5 text-sm font-semibold shadow-lg shadow-brand-red/20 active:scale-95 disabled:opacity-50">
+                                    className="flex items-center gap-1 rounded-xl bg-brand-red px-3 sm:px-3.5 py-2 text-xs font-bold shadow-lg shadow-brand-red/20 active:scale-95 disabled:opacity-50 text-white">
                                     {loadingActionId === delivery.id ? (
-                                      <><RefreshCw className="h-4 w-4 animate-spin" /> Cargando...</>
+                                      <><RefreshCw className="h-3.5 w-3.5 animate-spin" /> <span className="hidden xs:inline">Cargando...</span></>
                                     ) : (
-                                      <>Cobrar <ChevronRight className="h-4 w-4" /></>
+                                      <>Cobrar <ChevronRight className="h-3.5 w-3.5" /></>
                                     )}
                                   </button>
                                 </>
@@ -4273,34 +4288,42 @@ export default function BakeryDriverApp() {
                   )}
 
                   {/* Métricas rápidas de pedidos entregados */}
-                  <div className="flex flex-wrap items-center justify-between gap-3 text-xs font-semibold text-zinc-400 bg-emerald-950/20 border border-emerald-500/20 px-4 py-2.5 rounded-2xl">
-                    <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
-                      <span className="text-emerald-300">✅ <b>{filteredEntregados.length}</b> {filteredEntregados.length === 1 ? 'pedido entregado' : 'pedidos entregados'}</span>
-                      {!isClienteMayorista && (
-                        <span>👥 <b>{groupedEntregadosByClient.length}</b> {groupedEntregadosByClient.length === 1 ? 'cliente' : 'clientes'}</span>
-                      )}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs font-semibold text-zinc-400 bg-emerald-950/20 border border-emerald-500/20 px-3.5 sm:px-4 py-2.5 rounded-2xl">
+                    <div className="flex items-center justify-between sm:justify-start gap-2.5 sm:gap-4 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <span className="text-emerald-300">✅ <b>{filteredEntregados.length}</b> {filteredEntregados.length === 1 ? 'pedido entregado' : 'pedidos entregados'}</span>
+                        {!isClienteMayorista && (
+                          <>
+                            <span className="text-zinc-600">·</span>
+                            <span>👥 <b>{groupedEntregadosByClient.length}</b> {groupedEntregadosByClient.length === 1 ? 'cliente' : 'clientes'}</span>
+                          </>
+                        )}
+                      </div>
                       {!isClienteMayorista && pedidosViewMode === 'clientes' && groupedEntregadosByClient.length > 0 && (
-                        <div className="flex items-center gap-1.5 border-l border-emerald-500/20 pl-3">
+                        <div className="flex items-center gap-1.5 border-l border-emerald-500/20 pl-2.5 ml-auto sm:ml-0">
                           <button
                             type="button"
                             onClick={() => collapseAllClients(groupedEntregadosByClient.map(g => g.clientKey))}
-                            className="px-2 py-0.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 transition-colors"
+                            className="px-2 py-0.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-[11px] text-emerald-300 transition-colors"
                           >
-                            Colapsar todos
+                            Colapsar
                           </button>
                           <button
                             type="button"
                             onClick={() => expandAllClients(groupedEntregadosByClient.map(g => g.clientKey))}
-                            className="px-2 py-0.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 transition-colors"
+                            className="px-2 py-0.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-[11px] text-emerald-300 transition-colors"
                           >
-                            Expandir todos
+                            Expandir
                           </button>
                         </div>
                       )}
                     </div>
-                    <span className="text-emerald-400 font-bold text-sm">
-                      Total: ${filteredEntregados.reduce((acc, d) => acc + (d.total_raw || parseFloat(String(d.total).replace(/[^0-9.-]+/g, "")) || 0), 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                    </span>
+                    <div className="flex items-center justify-between sm:justify-end gap-2 border-t sm:border-t-0 border-emerald-500/10 pt-1.5 sm:pt-0">
+                      <span className="text-[11px] uppercase font-bold text-zinc-500 sm:hidden">Total Entregado:</span>
+                      <span className="text-emerald-400 font-extrabold text-sm">
+                        Total: ${filteredEntregados.reduce((acc, d) => acc + (d.total_raw || parseFloat(String(d.total).replace(/[^0-9.-]+/g, "")) || 0), 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
                   </div>
 
                   {loadingEntregados && (
@@ -4310,50 +4333,48 @@ export default function BakeryDriverApp() {
                   )}
 
                   {!loadingEntregados && (!isClienteMayorista && pedidosViewMode === 'clientes') ? (
-                    <div className="space-y-4">
+                    <div className="space-y-3 sm:space-y-4">
                       {groupedEntregadosByClient.map(group => {
                         const isCollapsed = !!collapsedClients[group.clientKey];
                         return (
-                          <div key={group.clientKey} className="rounded-3xl border border-white/10 bg-white/5 overflow-hidden backdrop-blur-md transition-all shadow-xl hover:border-emerald-500/30">
+                          <div key={group.clientKey} className="rounded-2xl sm:rounded-3xl border border-white/10 bg-white/5 overflow-hidden backdrop-blur-md transition-all shadow-xl hover:border-emerald-500/30">
                             {/* Cabecera del Cliente (Click para expandir / contraer) */}
                             <div
                               onClick={() => toggleClientCollapse(group.clientKey)}
-                              className={`p-4 sm:p-5 bg-black/40 ${isCollapsed ? '' : 'border-b border-white/10'} flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer select-none hover:bg-white/[0.04] transition-colors`}
+                              className={`px-3.5 py-3 sm:px-5 sm:py-4 bg-black/40 ${isCollapsed ? '' : 'border-b border-white/10'} flex items-center justify-between gap-2.5 cursor-pointer select-none hover:bg-white/[0.04] transition-colors`}
                             >
-                              <div className="flex items-center gap-3">
-                                <div className="h-11 w-11 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center shrink-0">
-                                  <Users className="h-5 w-5 text-emerald-400" />
+                              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                <div className="h-9 w-9 sm:h-11 sm:w-11 rounded-xl sm:rounded-2xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center shrink-0">
+                                  <Users className="h-4 w-4 sm:h-5 sm:w-5 text-emerald-400" />
                                 </div>
-                                <div>
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <h2 className="text-base sm:text-lg font-bold text-white leading-tight">{group.customer}</h2>
-                                    <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                                      {group.orders.length} {group.orders.length === 1 ? 'entregado' : 'entregados'}
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <h2 className="text-sm sm:text-base font-bold text-white truncate leading-tight">{group.customer}</h2>
+                                    <span className="text-[10px] sm:text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
+                                      {group.orders.length} {group.orders.length === 1 ? 'ped.' : 'entregados'}
                                     </span>
                                   </div>
-                                  <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400 mt-1">
-                                    {group.address && group.address !== 'Sin dirección' && (
-                                      <span className="flex items-center gap-1 text-zinc-300">
-                                        📍 {group.address}
-                                      </span>
-                                    )}
-                                    {group.telefono && (
-                                      <span className="flex items-center gap-1 text-zinc-400">
-                                        📞 {group.telefono}
-                                      </span>
-                                    )}
-                                  </div>
+                                  {((group.address && group.address !== 'Sin dirección') || group.telefono) && (
+                                    <div className="flex items-center gap-2 text-[11px] text-zinc-400 truncate mt-0.5">
+                                      {group.address && group.address !== 'Sin dirección' && (
+                                        <span className="truncate">📍 {group.address}</span>
+                                      )}
+                                      {group.telefono && (
+                                        <span className="shrink-0 text-zinc-500">📞 {group.telefono}</span>
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
                               </div>
 
-                              <div className="flex items-center justify-between sm:justify-end gap-4 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-white/5">
+                              <div className="flex items-center gap-2 sm:gap-3 shrink-0">
                                 <div className="text-right">
-                                  <p className="text-[10px] uppercase font-bold text-zinc-500">Total Histórico</p>
-                                  <p className="text-lg font-extrabold text-emerald-400">
+                                  <p className="text-[9px] sm:text-[10px] uppercase font-bold text-zinc-500 leading-tight">Total</p>
+                                  <p className="text-sm sm:text-base font-extrabold text-emerald-400 leading-tight">
                                     ${group.totalAmount.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                                   </p>
                                 </div>
-                                <div className={`p-2 rounded-xl bg-white/5 text-emerald-400 transition-all duration-200 ${isCollapsed ? '-rotate-90' : 'rotate-0'}`}>
+                                <div className={`p-1.5 rounded-lg bg-white/5 text-emerald-400 transition-transform duration-200 ${isCollapsed ? '-rotate-90' : 'rotate-0'}`}>
                                   <ChevronDown className="h-4 w-4" />
                                 </div>
                               </div>
@@ -4361,87 +4382,54 @@ export default function BakeryDriverApp() {
 
                             {/* Pedidos Entregados del Cliente */}
                             {!isCollapsed && (
-                              <div className="p-3 sm:p-4 space-y-3 bg-black/10">
+                              <div className="p-2.5 sm:p-4 space-y-2.5 sm:space-y-3 bg-black/10">
                                 {group.orders.map(delivery => (
-                                  <div key={delivery.id} className="rounded-2xl border border-white/10 bg-zinc-900/60 p-3.5 sm:p-4 flex flex-col justify-between gap-3 hover:border-emerald-500/40 transition-all">
-                                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                                  <div key={delivery.id} className="rounded-xl sm:rounded-2xl border border-white/10 bg-zinc-900/60 p-3 sm:p-4 flex flex-col justify-between gap-3 hover:border-emerald-500/40 transition-all">
+                                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2.5">
                                       <div className="flex-1 min-w-0">
-                                        <div className="flex flex-wrap items-center gap-2">
-                                          <span className="text-sm font-bold text-white">Pedido #{delivery.id}</span>
+                                        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                                          <span className="text-xs sm:text-sm font-bold text-white">Pedido #{delivery.id}</span>
                                           <StatusBadge status="Delivered" />
                                           <CreadorBadge creador={delivery.creador} />
                                           {delivery.fecha_entrega && (
-                                            <span className="text-[10px] font-bold tracking-wider text-emerald-300 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
+                                            <span className="text-[10px] font-bold tracking-wider text-emerald-300 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
                                               📅 ENTREGADO: {delivery.fecha_entrega.split('-').reverse().join('/')}
                                             </span>
                                           )}
                                         </div>
                                         {delivery.notas && (
-                                          <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-xl mt-2 inline-block">
+                                          <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-lg mt-1.5 inline-block">
                                             💬 {delivery.notas}
                                           </p>
                                         )}
-                                        <div className="mt-2 text-xs text-zinc-300 bg-black/30 rounded-xl px-3 py-2 border border-white/5 font-mono">
-                                          {delivery.items}
-                                        </div>
+                                        <ItemPills itemsStr={delivery.items} />
                                       </div>
 
-                                      <div className="sm:text-right shrink-0">
-                                        <p className="text-[10px] uppercase font-bold text-zinc-500">Total Pedido</p>
-                                        <p className="text-base sm:text-lg font-bold text-white">{delivery.total}</p>
-                                        <p className="text-[11px] text-zinc-400 mt-0.5">
-                                          {delivery.forma_de_pago ? `Pago: ${delivery.forma_de_pago}` : ''}
-                                        </p>
+                                      <div className="flex items-center justify-between sm:flex-col sm:items-end shrink-0 pt-1.5 sm:pt-0 border-t sm:border-t-0 border-white/5">
+                                        <span className="text-[10px] uppercase font-bold text-zinc-500 sm:hidden">Total Pedido:</span>
+                                        <div className="text-right">
+                                          <p className="text-[10px] uppercase font-bold text-zinc-500 hidden sm:block">Total Pedido</p>
+                                          <p className="text-base sm:text-lg font-bold text-white leading-tight">{delivery.total}</p>
+                                          {delivery.forma_de_pago && (
+                                            <p className="text-[11px] text-zinc-400 mt-0.5">
+                                              Pago: {delivery.forma_de_pago}
+                                            </p>
+                                          )}
+                                        </div>
                                       </div>
                                     </div>
 
-                                    {/* Botones de acción (Remito Simple / Doble) */}
-                                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/5">
-                                      <div className="flex items-center gap-2">
-                                        <div className="relative group">
-                                          <button
-                                            className="flex items-center gap-1.5 rounded-xl bg-blue-500/10 border border-blue-500/20 px-3 py-2 hover:bg-blue-500/20 active:scale-95 text-blue-400 text-xs font-semibold"
-                                            title="Descargar remito">
-                                            <Download className="h-3.5 w-3.5" />
-                                            <span>Descargar Remito</span>
-                                          </button>
-                                          <div className="absolute bottom-full left-0 mb-2 hidden group-focus-within:flex flex-col bg-zinc-900 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-20 min-w-[160px]">
-                                            <button
-                                              onClick={async () => {
-                                                try {
-                                                  const res = await fetch(`${API_URL}/pedidos/${delivery.id}/comprobante?doble=false`, { headers: { Authorization: `Bearer ${token}` } });
-                                                  if (res.ok) {
-                                                    const blob = await res.blob();
-                                                    const url = window.URL.createObjectURL(blob);
-                                                    const a = document.createElement("a");
-                                                    a.href = url; a.download = `Remito_${delivery.id}.pdf`;
-                                                    document.body.appendChild(a); a.click(); a.remove();
-                                                    window.URL.revokeObjectURL(url);
-                                                  } else { alert("Error al descargar"); }
-                                                } catch { alert("Error de conexión"); }
-                                              }}
-                                              className="px-4 py-2.5 text-xs text-left hover:bg-white/10 text-zinc-300 transition-colors">
-                                              📄 Remito Simple
-                                            </button>
-                                            <button
-                                              onClick={async () => {
-                                                try {
-                                                  const res = await fetch(`${API_URL}/pedidos/${delivery.id}/comprobante?doble=true`, { headers: { Authorization: `Bearer ${token}` } });
-                                                  if (res.ok) {
-                                                    const blob = await res.blob();
-                                                    const url = window.URL.createObjectURL(blob);
-                                                    const a = document.createElement("a");
-                                                    a.href = url; a.download = `Remito_Doble_${delivery.id}.pdf`;
-                                                    document.body.appendChild(a); a.click(); a.remove();
-                                                    window.URL.revokeObjectURL(url);
-                                                  } else { alert("Error al descargar"); }
-                                                } catch { alert("Error de conexión"); }
-                                              }}
-                                              className="px-4 py-2.5 text-xs text-left hover:bg-white/10 text-zinc-300 border-t border-white/5 transition-colors">
-                                              📄📄 Remito Doble
-                                            </button>
-                                          </div>
-                                        </div>
+                                    {/* Botones de acción */}
+                                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/5">
+                                      <div className="flex items-center gap-1.5 sm:gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => setRemitoModalDelivery(delivery)}
+                                          className="flex items-center gap-1.5 rounded-xl bg-blue-500/10 border border-blue-500/20 px-2.5 sm:px-3 py-2 hover:bg-blue-500/20 active:scale-95 text-blue-400 text-xs font-semibold"
+                                          title="Descargar remito">
+                                          <Download className="h-3.5 w-3.5" />
+                                          <span>Descargar Remito</span>
+                                        </button>
                                       </div>
 
                                       <div className="flex items-center gap-2 ml-auto">
@@ -4460,22 +4448,24 @@ export default function BakeryDriverApp() {
                     </div>
                   ) : !loadingEntregados ? (
                     /* Vista Lista Tradicional de Entregados */
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
                       {filteredEntregados.map(delivery => (
-                        <div key={delivery.id} className="rounded-3xl border border-white/10 bg-white/5 p-4 flex flex-col justify-between hover:border-emerald-500/30 transition-all">
+                        <div key={delivery.id} className="rounded-2xl sm:rounded-3xl border border-white/10 bg-white/5 p-3.5 sm:p-4 flex flex-col justify-between gap-3 hover:border-emerald-500/30 transition-all">
                           <div>
                             <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <h3 className="text-base font-semibold">{delivery.customer}</h3>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                                  <h3 className="text-sm sm:text-base font-semibold truncate">{delivery.customer}</h3>
                                   <CreadorBadge creador={delivery.creador} />
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2 mt-1">
                                   <span className="text-xs font-bold text-zinc-300">#{delivery.id}</span>
-                                  <p className="text-xs text-zinc-400">· {delivery.address}</p>
+                                  {delivery.address && delivery.address !== 'Sin dirección' && (
+                                    <p className="text-xs text-zinc-400 truncate">· {delivery.address}</p>
+                                  )}
                                   {delivery.fecha_entrega && (
                                     <span className="text-[10px] font-semibold tracking-wider text-emerald-300 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                                      ENTREGADO: {delivery.fecha_entrega.split('-').reverse().join('/')}
+                                      📅 ENTREGADO: {delivery.fecha_entrega.split('-').reverse().join('/')}
                                     </span>
                                   )}
                                 </div>
@@ -4487,60 +4477,26 @@ export default function BakeryDriverApp() {
                               </div>
                               <StatusBadge status="Delivered" />
                             </div>
-                            <div className="mt-2 rounded-xl bg-black/20 px-3 py-2 text-xs text-zinc-300">{delivery.items}</div>
+                            <ItemPills itemsStr={delivery.items} />
                           </div>
-                          <div className="mt-3 flex items-center justify-between">
+
+                          <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/5">
                             <div>
-                              <p className="text-xs text-zinc-500">Total</p>
-                              <p className="text-lg font-bold text-white">{delivery.total}</p>
+                              <p className="text-[10px] uppercase font-bold text-zinc-500 leading-tight">Total</p>
+                              <p className="text-base sm:text-lg font-bold text-white leading-tight">{delivery.total}</p>
                               {delivery.forma_de_pago && (
                                 <p className="text-[10px] text-zinc-400">Pago: {delivery.forma_de_pago}</p>
                               )}
                             </div>
                             <div className="flex items-center gap-2">
-                              <div className="relative group">
-                                <button
-                                  className="flex items-center justify-center rounded-xl bg-blue-500/10 border border-blue-500/20 px-3 py-2.5 hover:bg-blue-500/20 active:scale-95 text-blue-400"
-                                  title="Descargar remito">
-                                  <Download className="h-4 w-4" />
-                                </button>
-                                <div className="absolute bottom-full right-0 mb-2 hidden group-focus-within:flex flex-col bg-zinc-900 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-20 min-w-[160px]">
-                                  <button
-                                    onClick={async () => {
-                                      try {
-                                        const res = await fetch(`${API_URL}/pedidos/${delivery.id}/comprobante?doble=false`, { headers: { Authorization: `Bearer ${token}` } });
-                                        if (res.ok) {
-                                          const blob = await res.blob();
-                                          const url = window.URL.createObjectURL(blob);
-                                          const a = document.createElement("a");
-                                          a.href = url; a.download = `Remito_${delivery.id}.pdf`;
-                                          document.body.appendChild(a); a.click(); a.remove();
-                                          window.URL.revokeObjectURL(url);
-                                        } else { alert("Error al descargar"); }
-                                      } catch { alert("Error de conexión"); }
-                                    }}
-                                    className="px-4 py-2.5 text-sm text-left hover:bg-white/10 text-zinc-300 transition-colors">
-                                    📄 Remito Simple
-                                  </button>
-                                  <button
-                                    onClick={async () => {
-                                      try {
-                                        const res = await fetch(`${API_URL}/pedidos/${delivery.id}/comprobante?doble=true`, { headers: { Authorization: `Bearer ${token}` } });
-                                        if (res.ok) {
-                                          const blob = await res.blob();
-                                          const url = window.URL.createObjectURL(blob);
-                                          const a = document.createElement("a");
-                                          a.href = url; a.download = `Remito_Doble_${delivery.id}.pdf`;
-                                          document.body.appendChild(a); a.click(); a.remove();
-                                          window.URL.revokeObjectURL(url);
-                                        } else { alert("Error al descargar"); }
-                                      } catch { alert("Error de conexión"); }
-                                    }}
-                                    className="px-4 py-2.5 text-sm text-left hover:bg-white/10 text-zinc-300 border-t border-white/5 transition-colors">
-                                    📄📄 Remito Doble
-                                  </button>
-                                </div>
-                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setRemitoModalDelivery(delivery)}
+                                className="flex items-center gap-1.5 rounded-xl bg-blue-500/10 border border-blue-500/20 px-2.5 sm:px-3 py-2 hover:bg-blue-500/20 active:scale-95 text-blue-400 text-xs font-semibold"
+                                title="Descargar remito">
+                                <Download className="h-3.5 w-3.5" />
+                                <span className="hidden sm:inline">Remito</span>
+                              </button>
 
                               <span className="inline-flex items-center gap-1 px-3 py-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl text-xs font-bold">
                                 <CheckCircle2 className="w-3.5 h-3.5" /> Entregado
@@ -4878,7 +4834,7 @@ export default function BakeryDriverApp() {
           )}
 
           {/* ── RECETAS ── */}
-          {activeTab === "recetas" && (isAdmin || isProduccion) && (
+          {activeTab === "recetas" && isAdmin && (
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <h1 className="text-2xl font-bold">Recetas de Producción</h1>
@@ -6032,194 +5988,6 @@ export default function BakeryDriverApp() {
                   )}
                 </div>
               )}
-
-              {/* ── Modales de Acción ── */}
-              {depositoModal && (
-                <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4">
-                  <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setDepositoModal(null)} />
-                  <div className="relative w-full max-w-md rounded-t-3xl md:rounded-3xl border-t md:border border-white/10 bg-zinc-950 p-6 pb-10 md:pb-6 shadow-2xl" onClick={e => e.stopPropagation()}>
-                    <div className="mx-auto mb-5 h-1 w-12 rounded-full bg-white/20 md:hidden" />
-                    <div className="flex items-center justify-between mb-5">
-                      <h2 className="text-lg font-bold">
-                        {depositoModal === 'entrada' ? '+ Registrar Entrada al Depósito' :
-                         depositoModal === 'editar_entrada' ? 'Editar Entrada (ID: ' + depositoModalItem?.id + ')' :
-                         depositoModal === 'distribuir' ? '→ Distribuir desde Depósito' :
-                         depositoModal === 'devolucion' ? '← Devolver al Depósito' :
-                         '🧪 Salida de Materia Prima'}
-                      </h2>
-                      <button onClick={() => setDepositoModal(null)} className="p-2 rounded-full bg-white/5 border border-white/10">
-                        <X className="h-4 w-4 text-zinc-400" />
-                      </button>
-                    </div>
-                    <form onSubmit={async (e) => {
-                      e.preventDefault();
-                      const fd = new FormData(e.target as HTMLFormElement);
-                      const itemId = fd.get('item_id');
-                      if (depositoModal !== 'editar_entrada' && !itemId) {
-                        alert('Por favor seleccioná un ítem');
-                        return;
-                      }
-                      const body: any = {
-                        tipo_item: fd.get('tipo_item'),
-                        item_id: itemId,
-                        motivo: fd.get('motivo') || undefined,
-                      };
-
-                      if (depositoModal === 'distribuir' || depositoModal === 'devolucion') {
-                        body.cantidad_panaderia = fd.get('cantidad_panaderia') ? parseFloat(fd.get('cantidad_panaderia') as string) : 0;
-                        body.repartidor_id = fd.get('repartidor_id') ? parseInt(fd.get('repartidor_id') as string) : null;
-                        body.qty_repartidor = fd.get('qty_repartidor') ? parseFloat(fd.get('qty_repartidor') as string) : 0;
-                      } else {
-                        body.cantidad = parseFloat(fd.get('cantidad') as string);
-                      }
-
-                      const url = depositoModal === 'entrada' ? `${API_URL}/deposito/entrada` :
-                                  depositoModal === 'editar_entrada' ? `${API_URL}/deposito/movimientos/${depositoModalItem.id}` :
-                                  depositoModal === 'distribuir' ? `${API_URL}/deposito/distribuir` :
-                                  depositoModal === 'devolucion' ? `${API_URL}/deposito/devolucion` :
-                                  `${API_URL}/deposito/mp/salida`;
-                      const method = depositoModal === 'editar_entrada' ? 'PUT' : 'POST';
-                      try {
-                        const res = await fetch(url, {
-                          method,
-                          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', Authorization: `Bearer ${token}` },
-                          body: JSON.stringify(body),
-                        });
-                        const data = await res.json();
-                        if (data.success) { 
-                          setDepositoModal(null); 
-                          fetchDeposito(); 
-                          if (depositoSubTab === 'historial') fetchDepositoMovimientos();
-                        }
-                        else { alert(data.message || 'Error'); }
-                      } catch { alert('Error de conexión'); }
-                    }} className="space-y-4">
-                      {/* Selección de ítem */}
-                      <div>
-                        <label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">
-                          {depositoModal === 'salida_mp' ? 'Materia Prima' : 'Producto'}
-                        </label>
-                        {depositoModal === 'editar_entrada' ? (
-                          <div className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 flex items-center text-sm text-zinc-300">
-                            {depositoModalItem?.item_nombre}
-                          </div>
-                        ) : depositoModalSelectedId && depositoModalSelectedItemObj ? (
-                          <div className="flex items-center justify-between w-full p-3 rounded-xl bg-white/5 border border-white/10">
-                            <div className="min-w-0 flex-1 pr-2">
-                              <p className="text-sm font-semibold text-white truncate">{depositoModalSelectedItemObj.nombre}</p>
-                              <p className="text-xs text-zinc-400">
-                                En depósito: <strong className="text-emerald-400">{depositoModalSelectedItemObj.stock_deposito} {depositoModalSelectedItemObj.unidad_medida || 'unidades'}</strong>
-                              </p>
-                            </div>
-                            {!depositoModalItem?.id && (
-                              <button
-                                type="button"
-                                onClick={() => { setDepositoModalSelectedId(''); setDepositoModalItemSearch(''); }}
-                                className="text-xs px-2.5 py-1 bg-white/10 hover:bg-white/20 rounded-lg text-brand-yellow transition-colors shrink-0"
-                              >
-                                Cambiar
-                              </button>
-                            )}
-                            <input type="hidden" name="item_id" value={depositoModalSelectedId} />
-                          </div>
-                        ) : (
-                          <div className="space-y-2">
-                            <div className="relative">
-                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
-                              <input
-                                type="text"
-                                placeholder={`Buscar ${depositoModal === 'salida_mp' || depositoModalItem?.tipo === 'materia_prima' ? 'materia prima' : 'producto'}...`}
-                                value={depositoModalItemSearch}
-                                onChange={e => setDepositoModalItemSearch(e.target.value)}
-                                className="w-full h-11 pl-9 pr-4 rounded-xl bg-white/5 border border-white/10 text-sm text-white focus:border-brand-red outline-none"
-                                autoFocus
-                              />
-                            </div>
-                            <div className="max-h-48 overflow-y-auto rounded-xl border border-white/10 bg-black/40 divide-y divide-white/5">
-                              {depositoModalItemsList
-                                .filter(item => {
-                                  const term = depositoModalItemSearch.toLowerCase().trim();
-                                  if (!term) return true;
-                                  const name = (item.nombre || item.producto || '').toLowerCase();
-                                  return name.includes(term);
-                                })
-                                .map(item => (
-                                  <button
-                                    key={item.id}
-                                    type="button"
-                                    onClick={() => setDepositoModalSelectedId(item.id)}
-                                    className="w-full text-left px-4 py-2.5 hover:bg-white/10 flex justify-between items-center text-sm transition-colors"
-                                  >
-                                    <span className="text-zinc-200 font-medium truncate mr-2">{item.nombre}</span>
-                                    <span className="text-xs text-zinc-400 shrink-0">
-                                      depósito: <strong className="text-emerald-400">{item.stock_deposito} {item.unidad_medida || ''}</strong>
-                                    </span>
-                                  </button>
-                                ))
-                              }
-                              {depositoModalItemsList.filter(item => (item.nombre || item.producto || '').toLowerCase().includes(depositoModalItemSearch.toLowerCase().trim())).length === 0 && (
-                                <p className="text-center text-zinc-500 text-xs py-4">No se encontraron ítems</p>
-                              )}
-                            </div>
-                            <input type="hidden" name="item_id" value="" />
-                          </div>
-                        )}
-                        <input type="hidden" name="tipo_item" value={depositoModal === 'salida_mp' || depositoModalItem?.tipo === 'materia_prima' ? 'materia_prima' : 'articulo'} />
-                      </div>
-                      
-                      {/* Cantidades (distribuir o devolucion) */}
-                      {(depositoModal === 'distribuir' || depositoModal === 'devolucion') && (
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <label className="text-[10px] text-zinc-400 uppercase tracking-widest mb-1.5 block">Panadería</label>
-                            <input name="cantidad_panaderia" type="number" step="0.01" min="0" placeholder="0"
-                              defaultValue={depositoModal === 'devolucion' && depositoModalItem ? depositoModalItem.stock_panaderia : undefined}
-                              className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-yellow" />
-                          </div>
-                          <div>
-                            <label className="text-[10px] text-zinc-400 uppercase tracking-widest mb-1.5 block">Repartidor (opcional)</label>
-                            <div className="flex gap-2">
-                              <select name="repartidor_id" className="flex-1 h-11 rounded-xl bg-white/5 border border-white/10 px-2 text-sm text-white outline-none focus:border-emerald-500">
-                                <option value="">Seleccione...</option>
-                                {repartidores.map(r => (
-                                  <option key={r.id} value={r.id}>{r.name}</option>
-                                ))}
-                              </select>
-                              <input name="qty_repartidor" type="number" step="0.01" min="0" placeholder="Cant."
-                                className="w-20 h-11 rounded-xl bg-white/5 border border-white/10 px-2 text-center text-sm text-emerald-300 outline-none focus:border-emerald-500" />
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Cantidad Única (solo entrada o salida mp) */}
-                      {(depositoModal === 'entrada' || depositoModal === 'editar_entrada' || depositoModal === 'salida_mp') && (
-                        <div>
-                          <label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">Cantidad</label>
-                          <input name="cantidad" type="number" step="0.01" min="0.01" required placeholder="Ej: 100"
-                            defaultValue={depositoModal === 'editar_entrada' ? depositoModalItem?.cantidad : undefined}
-                            className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-red" />
-                        </div>
-                      )}
-                      {/* Motivo */}
-                      <div>
-                        <label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">
-                          Motivo / Nota {depositoModal === 'salida_mp' ? '(obligatorio)' : '(opcional)'}
-                        </label>
-                        <input name="motivo" type="text" required={depositoModal === 'salida_mp'} placeholder="Ej: Compra proveedor XYZ / producción del lunes"
-                          defaultValue={depositoModal === 'editar_entrada' ? depositoModalItem?.motivo : undefined}
-                          className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-red" />
-                      </div>
-                      <div className="flex gap-3 pt-2">
-                        <button type="button" onClick={() => setDepositoModal(null)}
-                          className="flex-1 py-3.5 rounded-xl border border-white/10 text-zinc-300 font-semibold active:scale-95 text-sm">Cancelar</button>
-                        <button type="submit"
-                          className="flex-1 bg-brand-red text-white py-3.5 rounded-xl font-bold active:scale-95 text-sm">Confirmar</button>
-                      </div>
-                    </form>
-                  </div>
-                </div>
-              )}
             </div>
           )}
           {/* ── DESPACHO A REPARTIDOR ── */}
@@ -6852,9 +6620,23 @@ export default function BakeryDriverApp() {
           </div>
         )}
 
-        {/* ── NAV ── */}
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 h-24 w-full border-t border-white/10 bg-black/70 backdrop-blur-3xl overflow-x-auto overflow-y-visible [&::-webkit-scrollbar]:hidden">
-          <div className={`flex items-center gap-6 px-6 h-full ${(isAdmin || isProduccion) ? 'justify-start min-w-max' : 'justify-around w-full'}`}>
+        {/* Botón flotante para restaurar menú en Mobile cuando está guardado */}
+        {mobileNavHidden && !depositoModal && !editingProduct && !checkoutOpen && (
+          <button
+            type="button"
+            onClick={() => setMobileNavHidden(false)}
+            className="md:hidden fixed bottom-5 right-4 z-40 flex items-center gap-2 px-3.5 py-2 rounded-full bg-zinc-900/90 border border-white/20 text-brand-yellow text-xs font-bold shadow-2xl backdrop-blur-xl active:scale-95 transition-all cursor-pointer"
+          >
+            <Menu className="w-3.5 h-3.5" />
+            <span>Menú</span>
+          </button>
+        )}
+
+        {/* ── NAV MOBILE ── */}
+        <nav className={`md:hidden fixed bottom-0 left-0 right-0 z-30 h-24 w-full border-t border-white/10 bg-black/70 backdrop-blur-3xl overflow-x-auto overflow-y-visible [&::-webkit-scrollbar]:hidden transition-all duration-300 ${
+          mobileNavHidden || depositoModal || editingProduct || checkoutOpen ? "translate-y-full pointer-events-none hidden" : "translate-y-0"
+        }`}>
+          <div className={`flex items-center gap-6 px-6 h-full ${isAdmin ? 'justify-start min-w-max' : 'justify-around w-full'}`}>
             {isClienteMayorista ? (
               <>
                 <NavButton icon={ShoppingCart} label="Hacer Pedido" value="cargar_pedido" prominent />
@@ -6863,9 +6645,9 @@ export default function BakeryDriverApp() {
               </>
             ) : (
               <>
+                <NavButton icon={Truck} label="Pedidos" value="pedidos" badge={deliveries.filter(d => d.status === "Late").length} />
                 {!isProduccion && (
                   <>
-                    <NavButton icon={Truck}        label="Pedidos" value="pedidos" badge={deliveries.filter(d => d.status === "Late").length} />
                     {!isVendedor && <NavButton icon={Package} label="Stock" value="stock" />}
                     <NavButton icon={ShoppingCart} label="Venta"   value="pos" prominent />
                     {!isVendedor && <NavButton icon={Users}        label="Personas" value="clientes" />}
@@ -6879,17 +6661,336 @@ export default function BakeryDriverApp() {
                     <NavButton icon={Warehouse}    label="Depósito" value="deposito" badge={depositoReservasPendientes.length} />
                     {isAdmin && <NavButton icon={ClipboardList} label="Materias" value="materias" />}
                     {isAdmin && <NavButton icon={ShoppingCart} label="Compras" value="compras" />}
-                    <NavButton icon={CheckCircle2} label="Recetas" value="recetas" />
+                    {isAdmin && <NavButton icon={CheckCircle2} label="Recetas" value="recetas" />}
                     {isAdmin && <NavButton icon={Truck}        label="Despacho" value="despacho" />}
                     {isAdmin && <NavButton icon={UserIcon}     label="Usuarios" value="usuarios" />}
                   </>
                 )}
+
+                <button
+                  type="button"
+                  onClick={() => setMobileNavHidden(true)}
+                  title="Guardar barra de navegación"
+                  className="flex flex-col items-center justify-center gap-1 text-zinc-500 hover:text-zinc-300 transition-all p-1 shrink-0 ml-1 cursor-pointer"
+                >
+                  <div className="w-10 h-10 rounded-2xl bg-white/5 flex items-center justify-center">
+                    <ChevronDown className="w-5 h-5 text-zinc-400" />
+                  </div>
+                  <span className="text-[10px] font-medium">Ocultar</span>
+                </button>
               </>
             )}
           </div>
         </nav>
       </div>
       </div>
+
+      {/* ── Depósito Modal (Entrada, Editar Entrada, Distribuir, Devolución, Salida MP) ── */}
+      {depositoModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setDepositoModal(null)} />
+          <div className="relative w-full max-w-md max-h-[90vh] flex flex-col rounded-3xl border border-white/10 bg-zinc-950 p-5 sm:p-6 shadow-2xl my-auto overflow-hidden z-10" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4 shrink-0">
+              <h2 className="text-base sm:text-lg font-bold truncate pr-2">
+                {depositoModal === 'entrada' ? '+ Registrar Entrada al Depósito' :
+                 depositoModal === 'editar_entrada' ? 'Editar Entrada (ID: ' + depositoModalItem?.id + ')' :
+                 depositoModal === 'distribuir' ? '→ Distribuir desde Depósito' :
+                 depositoModal === 'devolucion' ? '← Devolver al Depósito' :
+                 '🧪 Salida de Materia Prima'}
+              </h2>
+              <button type="button" onClick={() => setDepositoModal(null)} className="p-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-400 hover:text-white transition-all shrink-0">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              const fd = new FormData(e.target as HTMLFormElement);
+              const itemId = fd.get('item_id');
+              if (depositoModal !== 'editar_entrada' && !itemId) {
+                alert('Por favor seleccioná un ítem');
+                return;
+              }
+              const body: any = {
+                tipo_item: fd.get('tipo_item'),
+                item_id: itemId,
+                motivo: fd.get('motivo') || undefined,
+              };
+
+              if (depositoModal === 'distribuir' || depositoModal === 'devolucion') {
+                body.cantidad_panaderia = fd.get('cantidad_panaderia') ? parseFloat(fd.get('cantidad_panaderia') as string) : 0;
+                body.repartidor_id = fd.get('repartidor_id') ? parseInt(fd.get('repartidor_id') as string) : null;
+                body.qty_repartidor = fd.get('qty_repartidor') ? parseFloat(fd.get('qty_repartidor') as string) : 0;
+              } else {
+                body.cantidad = parseFloat(fd.get('cantidad') as string);
+              }
+
+              const url = depositoModal === 'entrada' ? `${API_URL}/deposito/entrada` :
+                          depositoModal === 'editar_entrada' ? `${API_URL}/deposito/movimientos/${depositoModalItem.id}` :
+                          depositoModal === 'distribuir' ? `${API_URL}/deposito/distribuir` :
+                          depositoModal === 'devolucion' ? `${API_URL}/deposito/devolucion` :
+                          `${API_URL}/deposito/mp/salida`;
+              const method = depositoModal === 'editar_entrada' ? 'PUT' : 'POST';
+              try {
+                const res = await fetch(url, {
+                  method,
+                  headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', Authorization: `Bearer ${token}` },
+                  body: JSON.stringify(body),
+                });
+                const data = await res.json();
+                if (data.success) { 
+                  setDepositoModal(null); 
+                  fetchDeposito(); 
+                  if (depositoSubTab === 'historial') fetchDepositoMovimientos();
+                }
+                else { alert(data.message || 'Error'); }
+              } catch { alert('Error de conexión'); }
+            }} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              <div className="space-y-4 overflow-y-auto flex-1 pr-1 pb-2">
+                {/* Selección de ítem */}
+                <div>
+                  <label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">
+                    {depositoModal === 'salida_mp' ? 'Materia Prima' : 'Producto'}
+                  </label>
+                  {depositoModal === 'editar_entrada' ? (
+                    <div className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 flex items-center text-sm text-zinc-300">
+                      {depositoModalItem?.item_nombre}
+                    </div>
+                  ) : depositoModalSelectedId && depositoModalSelectedItemObj ? (
+                    <div className="flex items-center justify-between w-full p-3 rounded-xl bg-white/5 border border-white/10">
+                      <div className="min-w-0 flex-1 pr-2">
+                        <p className="text-sm font-semibold text-white truncate">{depositoModalSelectedItemObj.nombre}</p>
+                        <p className="text-xs text-zinc-400">
+                          En depósito: <strong className="text-emerald-400">{depositoModalSelectedItemObj.stock_deposito} {depositoModalSelectedItemObj.unidad_medida || 'unidades'}</strong>
+                        </p>
+                      </div>
+                      {!depositoModalItem?.id && (
+                        <button
+                          type="button"
+                          onClick={() => { setDepositoModalSelectedId(''); setDepositoModalItemSearch(''); }}
+                          className="text-xs px-2.5 py-1 bg-white/10 hover:bg-white/20 rounded-lg text-brand-yellow transition-colors shrink-0 cursor-pointer"
+                        >
+                          Cambiar
+                        </button>
+                      )}
+                      <input type="hidden" name="item_id" value={depositoModalSelectedId} />
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                        <input
+                          type="text"
+                          placeholder={`Buscar ${depositoModal === 'salida_mp' || depositoModalItem?.tipo === 'materia_prima' ? 'materia prima' : 'producto'}...`}
+                          value={depositoModalItemSearch}
+                          onChange={e => setDepositoModalItemSearch(e.target.value)}
+                          className="w-full h-11 pl-9 pr-4 rounded-xl bg-white/5 border border-white/10 text-sm text-white focus:border-brand-red outline-none"
+                          autoFocus
+                        />
+                      </div>
+                      <div className="max-h-44 overflow-y-auto rounded-xl border border-white/10 bg-black/40 divide-y divide-white/5">
+                        {depositoModalItemsList
+                          .filter(item => {
+                            const term = depositoModalItemSearch.toLowerCase().trim();
+                            if (!term) return true;
+                            const name = (item.nombre || item.producto || '').toLowerCase();
+                            return name.includes(term);
+                          })
+                          .map(item => (
+                            <button
+                              key={item.id}
+                              type="button"
+                              onClick={() => setDepositoModalSelectedId(item.id)}
+                              className="w-full text-left px-4 py-2.5 hover:bg-white/10 flex justify-between items-center text-sm transition-colors cursor-pointer"
+                            >
+                              <span className="text-zinc-200 font-medium truncate mr-2">{item.nombre}</span>
+                              <span className="text-xs text-zinc-400 shrink-0">
+                                depósito: <strong className="text-emerald-400">{item.stock_deposito} {item.unidad_medida || ''}</strong>
+                              </span>
+                            </button>
+                          ))
+                        }
+                        {depositoModalItemsList.filter(item => (item.nombre || item.producto || '').toLowerCase().includes(depositoModalItemSearch.toLowerCase().trim())).length === 0 && (
+                          <p className="text-center text-zinc-500 text-xs py-4">No se encontraron ítems</p>
+                        )}
+                      </div>
+                      <input type="hidden" name="item_id" value="" />
+                    </div>
+                  )}
+                  <input type="hidden" name="tipo_item" value={depositoModal === 'salida_mp' || depositoModalItem?.tipo === 'materia_prima' ? 'materia_prima' : 'articulo'} />
+                </div>
+                
+                {/* Cantidades (distribuir o devolucion) */}
+                {(depositoModal === 'distribuir' || depositoModal === 'devolucion') && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] text-zinc-400 uppercase tracking-widest mb-1.5 block">Panadería</label>
+                      <input name="cantidad_panaderia" type="number" step="0.01" min="0" placeholder="0"
+                        defaultValue={depositoModal === 'devolucion' && depositoModalItem ? depositoModalItem.stock_panaderia : undefined}
+                        className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-yellow" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-zinc-400 uppercase tracking-widest mb-1.5 block">Repartidor (opcional)</label>
+                      <div className="flex gap-2">
+                        <select name="repartidor_id" className="flex-1 h-11 rounded-xl bg-white/5 border border-white/10 px-2 text-sm text-white outline-none focus:border-emerald-500">
+                          <option value="">Seleccione...</option>
+                          {repartidores.map(r => (
+                            <option key={r.id} value={r.id}>{r.name}</option>
+                          ))}
+                        </select>
+                        <input name="qty_repartidor" type="number" step="0.01" min="0" placeholder="Cant."
+                          className="w-20 h-11 rounded-xl bg-white/5 border border-white/10 px-2 text-center text-sm text-emerald-300 outline-none focus:border-emerald-500" />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Cantidad Única (solo entrada o salida mp) */}
+                {(depositoModal === 'entrada' || depositoModal === 'editar_entrada' || depositoModal === 'salida_mp') && (
+                  <div>
+                    <label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">Cantidad</label>
+                    <input name="cantidad" type="number" step="0.01" min="0.01" required placeholder="Ej: 100"
+                      defaultValue={depositoModal === 'editar_entrada' ? depositoModalItem?.cantidad : undefined}
+                      className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-red" />
+                  </div>
+                )}
+                {/* Motivo */}
+                <div>
+                  <label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">
+                    Motivo / Nota {depositoModal === 'salida_mp' ? '(obligatorio)' : '(opcional)'}
+                  </label>
+                  <input name="motivo" type="text" required={depositoModal === 'salida_mp'} placeholder="Ej: Compra proveedor XYZ / producción del lunes"
+                    defaultValue={depositoModal === 'editar_entrada' ? depositoModalItem?.motivo : undefined}
+                    className="w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white outline-none focus:border-brand-red" />
+                </div>
+              </div>
+
+              {/* Botones de Acción (siempre visibles y fijos al pie del modal) */}
+              <div className="flex gap-3 pt-3 border-t border-white/10 shrink-0 bg-zinc-950">
+                <button type="button" onClick={() => setDepositoModal(null)}
+                  className="flex-1 py-3 rounded-xl border border-white/10 text-zinc-300 font-semibold active:scale-95 text-sm hover:bg-white/5 transition-all cursor-pointer">
+                  Cancelar
+                </button>
+                <button type="submit"
+                  className="flex-1 bg-brand-red text-white py-3 rounded-xl font-bold active:scale-95 text-sm hover:bg-red-600 transition-all shadow-lg shadow-brand-red/20 cursor-pointer">
+                  Confirmar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal Descargar Remito (Mobile & Desktop) ── */}
+      {remitoModalDelivery && (
+        <div
+          className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-sm"
+          onClick={() => setRemitoModalDelivery(null)}
+        >
+          <div
+            className="bg-[#1c1c1e] w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border border-white/10 shadow-2xl p-5 sm:p-6 space-y-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                  <Download className="w-5 h-5 text-blue-400" /> Remito Pedido #{remitoModalDelivery.id}
+                </h3>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Cliente: <strong className="text-zinc-200">{remitoModalDelivery.customer}</strong>
+                </p>
+              </div>
+              <button
+                onClick={() => setRemitoModalDelivery(null)}
+                className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-2 pt-1">
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const d = remitoModalDelivery;
+                    setRemitoModalDelivery(null);
+                    const res = await fetch(`${API_URL}/pedidos/${d.id}/comprobante?doble=false`, {
+                      headers: { Authorization: `Bearer ${token}` }
+                    });
+                    if (res.ok) {
+                      const blob = await res.blob();
+                      const url = window.URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = `Remito_${d.id}.pdf`;
+                      document.body.appendChild(a);
+                      a.click();
+                      a.remove();
+                      window.URL.revokeObjectURL(url);
+                    } else {
+                      alert("Error al descargar remito");
+                    }
+                  } catch {
+                    alert("Error de conexión");
+                  }
+                }}
+                className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-white/5 hover:bg-blue-500/10 border border-white/10 hover:border-blue-500/30 text-white transition-all active:scale-95 group text-left cursor-pointer"
+              >
+                <div>
+                  <p className="text-sm font-bold text-white group-hover:text-blue-300">📄 Remito Simple</p>
+                  <p className="text-xs text-zinc-400">1 copia por hoja (estándar)</p>
+                </div>
+                <ChevronRight className="w-4 h-4 text-zinc-500 group-hover:text-blue-300" />
+              </button>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const d = remitoModalDelivery;
+                    setRemitoModalDelivery(null);
+                    const res = await fetch(`${API_URL}/pedidos/${d.id}/comprobante?doble=true`, {
+                      headers: { Authorization: `Bearer ${token}` }
+                    });
+                    if (res.ok) {
+                      const blob = await res.blob();
+                      const url = window.URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = `Remito_Doble_${d.id}.pdf`;
+                      document.body.appendChild(a);
+                      a.click();
+                      a.remove();
+                      window.URL.revokeObjectURL(url);
+                    } else {
+                      alert("Error al descargar remito");
+                    }
+                  } catch {
+                    alert("Error de conexión");
+                  }
+                }}
+                className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-white/5 hover:bg-blue-500/10 border border-white/10 hover:border-blue-500/30 text-white transition-all active:scale-95 group text-left cursor-pointer"
+              >
+                <div>
+                  <p className="text-sm font-bold text-white group-hover:text-blue-300">📄📄 Remito Doble</p>
+                  <p className="text-xs text-zinc-400">2 copias por hoja (original y duplicado)</p>
+                </div>
+                <ChevronRight className="w-4 h-4 text-zinc-500 group-hover:text-blue-300" />
+              </button>
+            </div>
+
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => setRemitoModalDelivery(null)}
+                className="w-full py-3 bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white rounded-xl font-bold text-xs transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <ProductEditModal
         open={!!editingProduct}

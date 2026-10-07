@@ -112,16 +112,20 @@ export default function ComprasApp({ token, onClose }: { token: string, onClose?
     }
   };
 
-  const handleUpdateItem = (index: number, field: string, value: any) => {
-    const nuevos = [...articulos];
-    nuevos[index] = { ...nuevos[index], [field]: value };
-    setArticulos(nuevos);
+  const handleUpdateItem = (index: number, field: string | Record<string, any>, value?: any) => {
+    setArticulos(prev => {
+      const nuevos = [...prev];
+      if (typeof field === 'object' && field !== null) {
+        nuevos[index] = { ...nuevos[index], ...field };
+      } else {
+        nuevos[index] = { ...nuevos[index], [field]: value };
+      }
+      return nuevos;
+    });
   };
 
   const handleRemoveItem = (index: number) => {
-    const nuevos = [...articulos];
-    nuevos.splice(index, 1);
-    setArticulos(nuevos);
+    setArticulos(prev => prev.filter((_, i) => i !== index));
   };
 
   const totalCompra = articulos.reduce((acc, art) => {
@@ -137,10 +141,6 @@ export default function ComprasApp({ token, onClose }: { token: string, onClose?
     }
     if (articulos.length === 0) {
       setErrorMsg("Agrega al menos una materia prima o artículo a la compra.");
-      return;
-    }
-    if (!numRecibo.trim()) {
-      setErrorMsg("Ingresa el número de factura o remito.");
       return;
     }
 
@@ -184,7 +184,7 @@ export default function ComprasApp({ token, onClose }: { token: string, onClose?
         body: JSON.stringify({
           idpersona: selectedProveedor.idpersona,
           tipo_compra: 'Factura',
-          num_recibo: numRecibo.trim(),
+          num_recibo: numRecibo.trim() || null,
           pago: parseFloat(String(pago).replace(',', '.')) || 0,
           tipo_pago: tipoPago,
           impacta_caja: impactaCaja,
@@ -431,9 +431,15 @@ export default function ComprasApp({ token, onClose }: { token: string, onClose?
                       <div className="min-w-0 space-y-1">
                         <div className="flex items-center gap-2.5 flex-wrap">
                           <span className="font-bold text-white text-base">{provName}</span>
-                          <span className="text-xs font-mono font-bold text-brand-yellow bg-brand-yellow/10 border border-brand-yellow/20 px-2.5 py-0.5 rounded-lg">
-                            Fac #{compra.num_recibo}
-                          </span>
+                          {compra.num_recibo ? (
+                            <span className="text-xs font-mono font-bold text-brand-yellow bg-brand-yellow/10 border border-brand-yellow/20 px-2.5 py-0.5 rounded-lg">
+                              Fac #{compra.num_recibo}
+                            </span>
+                          ) : (
+                            <span className="text-xs font-mono font-bold text-zinc-400 bg-white/5 border border-white/10 px-2.5 py-0.5 rounded-lg">
+                              S/N
+                            </span>
+                          )}
                           <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase ${
                             compra.impacta_caja ? 'bg-amber-500/20 text-amber-300' : 'bg-white/10 text-zinc-400'
                           }`}>
