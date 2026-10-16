@@ -40,6 +40,28 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# AI & Agent Context
+# AI, Agents, Rules & Documentation
 AGENTS.md
 /agents/
+/.agents/
+*agent*
+*AGENT*
+*.md
+!README.md
+*PENDIENTES*
+*pendientes*
+*RULES*
+*rules*
+*TODO*
+*todo*
+*CONTEXT*
+*INSTRUCTIONS*
+
+# Tests & Scratch files
+/test/
+/tests/
+*.test.*
+*.spec.*
+test.*
+test_*
+scratch/
