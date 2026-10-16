@@ -2967,7 +2967,7 @@ export default function BakeryDriverApp() {
     }
     
     return baseList.sort((a, b) => (b.sold_qty || 0) - (a.sold_qty || 0));
-  }, [products, posSearch, isVendedor, isAdmin, adminPosMode]);
+  }, [products, posSearch, isVendedor, isAdmin, adminPosMode, isRepartidor, isPreventista]);
 
   // Checkout state
   const [checkoutOpen, setCheckoutOpen] = useState(false);
@@ -3363,7 +3363,7 @@ export default function BakeryDriverApp() {
 
   const updateQuantity = (product: Product, change: number) => {
     setCart(prev => {
-      const maxLimit = (isClienteMayorista || isPreventista) ? 99999 : product.quantity;
+      const maxLimit = isClienteMayorista ? 99999 : product.quantity;
       const next = Math.max(0, Math.min(maxLimit, (prev[product.id] || 0) + change));
       return { ...prev, [product.id]: next };
     });
@@ -3376,7 +3376,7 @@ export default function BakeryDriverApp() {
     }
     const parsed = parseFloat(value.replace(",", "."));
     if (isNaN(parsed)) return;
-    const maxLimit = (isClienteMayorista || isPreventista) ? 99999 : product.quantity;
+    const maxLimit = isClienteMayorista ? 99999 : product.quantity;
     const clamped = Math.max(0, Math.min(maxLimit, Math.round(parsed * 1000) / 1000));
     setCart(prev => ({ ...prev, [product.id]: clamped }));
   };
@@ -4516,7 +4516,7 @@ export default function BakeryDriverApp() {
                       <SortableContext items={displayedProducts.map(p => p.id)} strategy={rectSortingStrategy}>
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                           {displayedProducts.map(product => {
-                            const disabled = !isPreventista && product.quantity === 0;
+                            const disabled = product.quantity === 0;
                             const qty = cart[product.id] || 0;
                             return (
                               <SortableProductItem
@@ -4536,7 +4536,7 @@ export default function BakeryDriverApp() {
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                       {displayedProducts.map(product => {
-                        const disabled = !isPreventista && product.quantity === 0;
+                        const disabled = product.quantity === 0;
                         const qty = cart[product.id] || 0;
                         return (
                           <div key={product.id}
@@ -5517,7 +5517,9 @@ export default function BakeryDriverApp() {
                     </div>
                   )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                    {products.map(item => (
+                    {products
+                      .filter(item => (item as any).disponible_reparto === true || (item as any).disponible_reparto === 1)
+                      .map(item => (
                       <div key={item.id} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
                         <div>
                           <p className="text-sm font-semibold">{item.name}</p>
