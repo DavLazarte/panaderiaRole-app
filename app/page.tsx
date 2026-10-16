@@ -2381,9 +2381,16 @@ export default function BakeryDriverApp() {
   const [tesoreriaMovimientos, setTesoreriaMovimientos] = useState<any[]>([]);
   const [loadingTesoreria, setLoadingTesoreria] = useState(false);
   const [tesoreriaModal, setTesoreriaModal] = useState<'movimiento' | 'retiro' | null>(null);
-  const [tesoreriaForm, setTesoreriaForm] = useState({
-    tipo: 'ingreso' as 'ingreso' | 'egreso',
-    metodo_pago: 'efectivo' as 'efectivo' | 'transferencia',
+  const [tesoreriaForm, setTesoreriaForm] = useState<{
+    tipo: 'ingreso' | 'egreso';
+    metodo_pago: 'efectivo' | 'transferencia';
+    monto: string;
+    concepto: string;
+    observaciones: string;
+    fecha?: string;
+  }>({
+    tipo: 'ingreso',
+    metodo_pago: 'efectivo',
     monto: '',
     concepto: '',
     observaciones: '',
@@ -2790,7 +2797,7 @@ export default function BakeryDriverApp() {
       if (res.ok && data.success) {
         alert(data.message);
         setTesoreriaModal(null);
-        setTesoreriaForm({ tipo: 'ingreso', metodo_pago: 'efectivo', monto: '', concepto: '', observaciones: '' });
+        setTesoreriaForm({ tipo: 'ingreso', metodo_pago: 'efectivo', monto: '', concepto: '', observaciones: '', fecha: '' });
         setHistoryRefresh(p => p + 1);
         fetchCajaTurno();
         if (historyTab === 'tesoreria') fetchTesoreria();
