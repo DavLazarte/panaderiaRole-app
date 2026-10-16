@@ -1,6 +1,6 @@
 "use client";
 import React from 'react';
-import { CircleDollarSign, Receipt, CreditCard, Banknote, ShieldCheck } from 'lucide-react';
+import { CircleDollarSign, Receipt, CreditCard, Banknote, ShieldCheck, Landmark } from 'lucide-react';
 
 interface ResumenPagoProps {
   total: number;
@@ -12,10 +12,13 @@ interface ResumenPagoProps {
   setNumRecibo: (val: string) => void;
   impactaCaja: boolean;
   setImpactaCaja: (val: boolean) => void;
+  origenDinero: string;
+  setOrigenDinero: (val: string) => void;
 }
 
 export default function ResumenPago({ 
-  total, pago, setPago, tipoPago, setTipoPago, numRecibo, setNumRecibo, impactaCaja, setImpactaCaja 
+  total, pago, setPago, tipoPago, setTipoPago, numRecibo, setNumRecibo, impactaCaja, setImpactaCaja,
+  origenDinero, setOrigenDinero
 }: ResumenPagoProps) {
   
   const pagoNum = parseFloat(String(pago).replace(',', '.')) || 0;
@@ -83,6 +86,10 @@ export default function ResumenPago({
                       setTipoPago(f.id);
                       if (f.id === 'cuenta_corriente') {
                         setPago('0');
+                      } else if (f.id === 'transferencia') {
+                        setOrigenDinero('tesoreria_transferencia');
+                      } else if (f.id === 'efectivo') {
+                        setOrigenDinero('tesoreria_efectivo');
                       }
                     }}
                     className={`p-3.5 sm:p-4 rounded-2xl border text-xs sm:text-sm font-bold flex flex-col items-center gap-2 transition-all cursor-pointer ${
@@ -106,7 +113,13 @@ export default function ResumenPago({
                 type="checkbox" 
                 id="impacta_caja_toggle"
                 checked={impactaCaja}
-                onChange={e => setImpactaCaja(e.target.checked)}
+                onChange={e => {
+                  const checked = e.target.checked;
+                  setImpactaCaja(checked);
+                  if (!checked) {
+                    setOrigenDinero(tipoPago === 'transferencia' ? 'tesoreria_transferencia' : 'tesoreria_efectivo');
+                  }
+                }}
                 className="w-5 h-5 rounded border-zinc-700 bg-zinc-900 text-brand-red accent-brand-red cursor-pointer"
               />
               <label htmlFor="impacta_caja_toggle" className="text-xs sm:text-sm text-zinc-200 font-semibold cursor-pointer">
@@ -122,6 +135,70 @@ export default function ResumenPago({
               {impactaCaja ? 'Resta de Efectivo' : 'Sin Impacto en Caja'}
             </span>
           </div>
+
+          {/* Selector de Origen de Fondos en Tesorería Central cuando no resta de la caja del turno */}
+          {!impactaCaja && pagoNum > 0 && (
+            <div className="p-4 sm:p-5 rounded-2xl border border-amber-500/30 bg-amber-950/20 space-y-3.5 animate-in fade-in duration-200">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Landmark className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span className="text-xs font-bold text-amber-300 uppercase tracking-wider">
+                    ¿De dónde se descuenta en Tesorería Central?
+                  </span>
+                </div>
+                <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2.5 py-0.5 rounded-full border border-amber-500/20">
+                  Caja Mayor
+                </span>
+              </div>
+              <p className="text-[11px] text-zinc-400 leading-relaxed">
+                Al no descontar de la caja del mostrador, podés registrar el egreso directamente en Tesorería Central (Bóveda o Banco) o dejarlo sin registrar.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setOrigenDinero('tesoreria_transferencia')}
+                  className={`p-3 rounded-xl border text-xs font-bold flex flex-col items-center gap-1.5 transition-all cursor-pointer ${
+                    origenDinero === 'tesoreria_transferencia'
+                      ? 'border-brand-yellow bg-brand-yellow/15 text-white shadow-lg shadow-brand-yellow/10 ring-1 ring-brand-yellow'
+                      : 'border-white/5 bg-black/40 text-zinc-400 hover:text-white hover:border-white/20'
+                  }`}
+                >
+                  <CreditCard className="w-4 h-4 text-sky-400" />
+                  <span className="text-center font-semibold">Banco / Transf.</span>
+                  <span className="text-[10px] text-zinc-400 font-normal">Debita cuenta bancaria</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setOrigenDinero('tesoreria_efectivo')}
+                  className={`p-3 rounded-xl border text-xs font-bold flex flex-col items-center gap-1.5 transition-all cursor-pointer ${
+                    origenDinero === 'tesoreria_efectivo'
+                      ? 'border-brand-yellow bg-brand-yellow/15 text-white shadow-lg shadow-brand-yellow/10 ring-1 ring-brand-yellow'
+                      : 'border-white/5 bg-black/40 text-zinc-400 hover:text-white hover:border-white/20'
+                  }`}
+                >
+                  <Banknote className="w-4 h-4 text-emerald-400" />
+                  <span className="text-center font-semibold">Bóveda Efectivo</span>
+                  <span className="text-[10px] text-zinc-400 font-normal">Debita efectivo central</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setOrigenDinero('ninguno')}
+                  className={`p-3 rounded-xl border text-xs font-bold flex flex-col items-center gap-1.5 transition-all cursor-pointer ${
+                    origenDinero === 'ninguno'
+                      ? 'border-zinc-500 bg-zinc-800 text-white shadow-lg ring-1 ring-zinc-500'
+                      : 'border-white/5 bg-black/40 text-zinc-400 hover:text-white hover:border-white/20'
+                  }`}
+                >
+                  <CircleDollarSign className="w-4 h-4 text-zinc-400" />
+                  <span className="text-center font-semibold">No descontar</span>
+                  <span className="text-[10px] text-zinc-400 font-normal">Sin impacto financiero</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Columna Derecha: Tarjeta Financiera de Totales (5 cols) */}

@@ -7,7 +7,7 @@ import {
   User as UserIcon, X, Check, Calendar, CheckCircle2,
   CreditCard, Banknote, Clock, Receipt, ArrowLeft,
   ChevronDown, AlertCircle, RefreshCw, Trash2, PieChart as PieChartIcon, BarChart3, Edit2, Download, Warehouse, Archive,
-  Building2, Eye, EyeOff
+  Building2, Eye, EyeOff, Repeat
 } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 
@@ -80,7 +80,7 @@ const parsePaymentInput = (formatted: string): number => {
 };
 
 interface Product  { id: number; name: string; price: number; quantity: number; stock?: number; sold_qty?: number; reserved_qty?: number; stock_local?: number; stock_repartidores?: { [id: string]: { cantidad: number, cantidad_reservada: number } }; descripcion?: string; codigo?: string; estado?: string; idcategoria?: number; precio_unitario?: number; precio_reparto?: number; precio_bar?: number; disponible_reparto?: number; precios_especiales?: any[]; unidad_medida?: string; [key: string]: any; }
-interface Client   { id: number; name: string; address: string; balance: number; }
+interface Client   { id: number; name: string; address: string; balance: number; saldo_a_favor?: number; deuda?: number; }
 interface Delivery { id: number; customer: string; status: string; estado?: string; estado_pedido?: string; fecha_venta?: string | null; pago?: number; saldo?: number; forma_de_pago?: string; items: string; raw_items?: {id?: number, name: string, qty: number}[]; total: string; total_raw: number; address: string; advance?: number; fecha_entrega?: string | null; idcliente?: number; telefono?: string; notas?: string; creador?: { id: number | null; nombre: string; email?: string | null; rol: string; tipo_origen: string; etiqueta_origen: string; }; }
 interface SaleItem { id: number; name: string; price: number; quantity: number; }
 interface Categoria { id_categoria: number; nombre: string; descripcion?: string; estado?: string; articulos_count?: number; }
@@ -433,6 +433,11 @@ function CheckoutModal({
   const [recargo, setRecargo] = useState(0);
   const [pago, setPago] = useState("");
   const [formaDePago, setFormaDePago] = useState("efectivo");
+  const [pagoEfectivo, setPagoEfectivo] = useState("");
+  const [pagoTransferencia, setPagoTransferencia] = useState("");
+  const [pagoCtaCte, setPagoCtaCte] = useState("");
+  const [pagoSaldoAFavor, setPagoSaldoAFavor] = useState("");
+  const [dejarVueltoComoSaldoAFavor, setDejarVueltoComoSaldoAFavor] = useState(false);
   const [loading, setLoading] = useState(false);
   const [completedVentaId, setCompletedVentaId] = useState<number | null>(null);
   const [loadingPdf, setLoadingPdf] = useState(false);
@@ -495,12 +500,81 @@ function CheckoutModal({
 
   const vuelto = useMemo(() => Math.max(0, Math.round((pagoNum - totalFinal) * 100) / 100), [totalFinal, pagoNum]);
 
+  // Saldo a favor disponible del cliente
+  const saldoAFavorCliente = useMemo(() => {
+    if (!selectedClient) return 0;
+    if (selectedClient.saldo_a_favor !== undefined && selectedClient.saldo_a_favor !== null) {
+      return Math.max(0, Number(selectedClient.saldo_a_favor) || 0);
+    }
+    return selectedClient.balance < 0 ? Math.abs(selectedClient.balance) : 0;
+  }, [selectedClient]);
+
+  // Cálculos de pago mixto
+  const efectivoNum = useMemo(() => parsePaymentInput(pagoEfectivo), [pagoEfectivo]);
+  const transfNum = useMemo(() => parsePaymentInput(pagoTransferencia), [pagoTransferencia]);
+  const ctaCteNum = useMemo(() => parsePaymentInput(pagoCtaCte), [pagoCtaCte]);
+  const saldoAFavorNum = useMemo(() => parsePaymentInput(pagoSaldoAFavor), [pagoSaldoAFavor]);
+
+  const totalCubiertoMixto = useMemo(() => {
+    return Math.round((efectivoNum + transfNum + ctaCteNum + saldoAFavorNum) * 100) / 100;
+  }, [efectivoNum, transfNum, ctaCteNum, saldoAFavorNum]);
+
+  const restantePorCubrir = useMemo(() => {
+    return Math.max(0, Math.round((totalFinal - totalCubiertoMixto) * 100) / 100);
+  }, [totalFinal, totalCubiertoMixto]);
+
+  const vueltoEfectivo = useMemo(() => {
+    if (formaDePago !== "mixto") return 0;
+    const noEfectivo = transfNum + ctaCteNum + saldoAFavorNum;
+    if (noEfectivo >= totalFinal) return 0;
+    const efectivoNecesario = Math.max(0, Math.round((totalFinal - noEfectivo) * 100) / 100);
+    return Math.max(0, Math.round((efectivoNum - efectivoNecesario) * 100) / 100);
+  }, [formaDePago, totalFinal, efectivoNum, transfNum, ctaCteNum, saldoAFavorNum]);
+
+  const handleLlenarRestante = (metodo: "efectivo" | "transferencia" | "cta_corriente" | "saldo_a_favor") => {
+    let otros = 0;
+    if (metodo !== "efectivo") otros += efectivoNum;
+    if (metodo !== "transferencia") otros += transfNum;
+    if (metodo !== "cta_corriente") otros += ctaCteNum;
+    if (metodo !== "saldo_a_favor") otros += saldoAFavorNum;
+
+    const faltante = Math.max(0, Math.round((totalFinal - otros) * 100) / 100);
+
+    if (metodo === "efectivo") setPagoEfectivo(formatPaymentInput(faltante.toString().replace(".", ",")));
+    else if (metodo === "transferencia") setPagoTransferencia(formatPaymentInput(faltante.toString().replace(".", ",")));
+    else if (metodo === "cta_corriente") setPagoCtaCte(formatPaymentInput(faltante.toString().replace(".", ",")));
+    else if (metodo === "saldo_a_favor") {
+      const aplicable = Math.min(saldoAFavorCliente, faltante);
+      setPagoSaldoAFavor(formatPaymentInput(aplicable.toString().replace(".", ",")));
+    }
+  };
+
+  const handleAplicarSaldoAFavor = () => {
+    if (saldoAFavorCliente <= 0 || totalFinal <= 0) return;
+    if (saldoAFavorCliente >= totalFinal) {
+      setFormaDePago("saldo_a_favor");
+      setPago(formatPaymentInput(totalFinal.toString().replace(".", ",")));
+    } else {
+      setFormaDePago("mixto");
+      setPagoSaldoAFavor(formatPaymentInput(saldoAFavorCliente.toString().replace(".", ",")));
+      const faltante = Math.max(0, Math.round((totalFinal - saldoAFavorCliente) * 100) / 100);
+      setPagoEfectivo(formatPaymentInput(faltante.toString().replace(".", ",")));
+      setPagoTransferencia("");
+      setPagoCtaCte("");
+    }
+  };
+
   useEffect(() => { setPago(formatPaymentInput(totalFinal.toString().replace(".", ","))); }, [totalFinal]);
 
   useEffect(() => {
     if (open) {
       setStep(0); setClientSearch(""); setDescuento(0);
       setRecargo(0); setFormaDePago("efectivo"); setEsPedido(false); setFechaEntrega("");
+      setPagoEfectivo("");
+      setPagoTransferencia("");
+      setPagoCtaCte("");
+      setPagoSaldoAFavor("");
+      setDejarVueltoComoSaldoAFavor(false);
       setCambios({});
       setHasExchanges(false);
       setCustomPrices({});
@@ -520,6 +594,33 @@ function CheckoutModal({
   );
 
   const handleConfirm = async () => {
+    if (!esPedido) {
+      if (formaDePago === "mixto") {
+        if (totalCubiertoMixto < totalFinal) {
+          alert(`El total cubierto ($${totalCubiertoMixto.toFixed(2)}) no alcanza para cubrir el total ($${totalFinal.toFixed(2)}). Asigna el faltante a algún medio de pago.`);
+          return;
+        }
+        if (ctaCteNum > 0 && !selectedClient) {
+          alert("Debes seleccionar un cliente para imputar un pago a Cuenta Corriente.");
+          return;
+        }
+      } else if (formaDePago === "saldo_a_favor") {
+        if (!selectedClient) {
+          alert("Debes seleccionar un cliente para pagar con saldo a favor.");
+          return;
+        }
+        if (saldoAFavorCliente < totalFinal) {
+          alert(`El saldo a favor disponible ($${saldoAFavorCliente.toFixed(2)}) no cubre el total de la venta ($${totalFinal.toFixed(2)}). Utiliza la opción de Pago Mixto.`);
+          return;
+        }
+      } else if (formaDePago === "cuenta_corriente") {
+        if (!selectedClient) {
+          alert("Debes seleccionar un cliente para vender a Cuenta Corriente.");
+          return;
+        }
+      }
+    }
+
     setLoading(true);
     try {
       let res;
@@ -535,16 +636,49 @@ function CheckoutModal({
         });
       } else if (pedidoId) {
         // Cobrar pedido existente
+        const desglosePayload = formaDePago === "mixto" ? {
+          efectivo: efectivoNum,
+          transferencia: transfNum,
+          tarjeta: 0,
+          cta_corriente: ctaCteNum,
+          saldo_a_favor: saldoAFavorNum,
+        } : formaDePago === "saldo_a_favor" ? {
+          saldo_a_favor: totalFinal,
+          efectivo: 0,
+          transferencia: 0,
+          tarjeta: 0,
+          cta_corriente: 0,
+        } : undefined;
+
         res = await fetch(`${API_URL}/pedidos/${pedidoId}/cobrar`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ pago: pagoNum, forma_de_pago: formaDePago }),
+          body: JSON.stringify({
+            pago: formaDePago === "mixto" ? totalCubiertoMixto : pagoNum,
+            forma_de_pago: formaDePago,
+            pagos_desglose: desglosePayload,
+            dejar_saldo_a_favor: dejarVueltoComoSaldoAFavor,
+          }),
         });
       } else {
         // Venta nueva
         const exchangesList = Object.entries(cambios)
           .filter(([, qty]) => qty > 0)
           .map(([id, qty]) => ({ id: Number(id), quantity: qty }));
+
+        const desglosePayload = formaDePago === "mixto" ? {
+          efectivo: efectivoNum,
+          transferencia: transfNum,
+          tarjeta: 0,
+          cta_corriente: ctaCteNum,
+          saldo_a_favor: saldoAFavorNum,
+        } : formaDePago === "saldo_a_favor" ? {
+          saldo_a_favor: totalFinal,
+          efectivo: 0,
+          transferencia: 0,
+          tarjeta: 0,
+          cta_corriente: 0,
+        } : undefined;
 
         res = await fetch(`${API_URL}/ventas`, {
           method: "POST",
@@ -558,8 +692,11 @@ function CheckoutModal({
             total: totalFinal,
             idcliente: selectedClient?.id ?? null,
             tipo_venta: isVendedor || !selectedClient ? "venta_rapida" : "venta_reparto",
-            descuento, recargo, pago: pagoNum,
+            descuento, recargo,
+            pago: formaDePago === "mixto" ? totalCubiertoMixto : pagoNum,
             forma_de_pago: formaDePago,
+            pagos_desglose: desglosePayload,
+            dejar_saldo_a_favor: dejarVueltoComoSaldoAFavor,
             es_pedido: esPedido,
             fecha_entrega: esPedido ? fechaEntrega : null,
             exchanges: exchangesList,
@@ -577,7 +714,10 @@ function CheckoutModal({
       } else {
         try {
           const err = await res.json();
-          alert(err.message || err.error || "Error al registrar venta");
+          const errorMsg = err.error && err.message !== err.error
+            ? `${err.message} (${err.error})`
+            : (err.message || err.error || "Error al registrar venta");
+          alert(errorMsg);
         } catch {
           const text = await res.text();
           alert(`Error del servidor (${res.status}): ${text.substring(0, 120)}`);
@@ -723,7 +863,14 @@ function CheckoutModal({
               {selectedClient ? (
                 <div className="flex items-center justify-between rounded-2xl border border-brand-red/40 bg-brand-red/10 p-3">
                   <div>
-                    <p className="font-semibold text-sm">{selectedClient.name}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="font-semibold text-sm">{selectedClient.name}</p>
+                      {saldoAFavorCliente > 0 && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                          +${saldoAFavorCliente.toLocaleString('es-AR', { minimumFractionDigits: 2 })} a favor
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-zinc-400">{selectedClient.address}</p>
                   </div>
                   <button onClick={() => setSelectedClient(null)} className="p-1 rounded-full bg-white/5">
@@ -739,13 +886,23 @@ function CheckoutModal({
                   </div>
                   {clientSearch && (
                     <div className="rounded-2xl border border-white/10 bg-zinc-900 overflow-hidden max-h-40 overflow-y-auto">
-                      {filteredClients.slice(0, 6).map(c => (
-                        <button key={c.id} onClick={() => { setSelectedClient(c); setClientSearch(""); }}
-                          className="w-full text-left px-4 py-3 text-sm hover:bg-white/5 border-b border-white/5 last:border-0 flex justify-between items-center">
-                          <span>{c.name}</span>
-                          {c.balance > 0 && <span className="text-xs text-red-400">Debe ${c.balance.toLocaleString('es-AR')}</span>}
-                        </button>
-                      ))}
+                      {filteredClients.slice(0, 6).map(c => {
+                        const clientSaldoAFavor = (c.saldo_a_favor !== undefined && c.saldo_a_favor !== null) ? Number(c.saldo_a_favor) : (c.balance < 0 ? Math.abs(c.balance) : 0);
+                        return (
+                          <button key={c.id} onClick={() => { setSelectedClient(c); setClientSearch(""); }}
+                            className="w-full text-left px-4 py-3 text-sm hover:bg-white/5 border-b border-white/5 last:border-0 flex justify-between items-center">
+                            <span>{c.name}</span>
+                            <div className="flex items-center gap-2">
+                              {clientSaldoAFavor > 0 && (
+                                <span className="text-xs text-emerald-400 font-bold">
+                                  +${clientSaldoAFavor.toLocaleString('es-AR')} a favor
+                                </span>
+                              )}
+                              {c.balance > 0 && <span className="text-xs text-red-400">Debe ${c.balance.toLocaleString('es-AR')}</span>}
+                            </div>
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                   <p className="text-xs text-zinc-500 mt-1">Sin cliente = Consumidor Final</p>
@@ -937,37 +1094,287 @@ function CheckoutModal({
               <>
                 <div>
                   <label className="text-xs text-zinc-400 uppercase tracking-widest mb-2 block">Forma de Pago</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {[
-                      { value: "efectivo", label: "Efectivo", icon: Banknote },
-                      { value: "transferencia", label: "Transfer.", icon: CreditCard },
-                      { value: "debito", label: "Débito", icon: CreditCard },
-                    ].map(({ value, label, icon: Icon }) => (
-                      <button key={value} onClick={() => setFormaDePago(value)}
-                        className={`py-3 rounded-xl text-xs font-semibold flex flex-col items-center gap-1 transition-all ${formaDePago === value ? "bg-brand-red text-white" : "bg-white/5 border border-white/10 text-zinc-300"}`}>
-                        <Icon className="h-4 w-4" /> {label}
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    <button
+                      type="button"
+                      onClick={() => setFormaDePago("efectivo")}
+                      className={`py-2.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all ${
+                        formaDePago === "efectivo"
+                          ? "bg-brand-red text-white shadow-md shadow-brand-red/20"
+                          : "bg-white/5 border border-white/10 text-zinc-300 hover:bg-white/10"
+                      }`}
+                    >
+                      <Banknote className="h-4 w-4" /> Efectivo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormaDePago("transferencia")}
+                      className={`py-2.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all ${
+                        formaDePago === "transferencia"
+                          ? "bg-brand-red text-white shadow-md shadow-brand-red/20"
+                          : "bg-white/5 border border-white/10 text-zinc-300 hover:bg-white/10"
+                      }`}
+                    >
+                      <CreditCard className="h-4 w-4" /> Transferencia
+                    </button>
+                  </div>
+
+                  <div className={`grid gap-2 ${saldoAFavorCliente > 0 ? "grid-cols-3" : "grid-cols-2"}`}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!selectedClient) {
+                          alert("Debes seleccionar un cliente para vender a Cuenta Corriente.");
+                          setStep(0);
+                          return;
+                        }
+                        setFormaDePago("cuenta_corriente");
+                      }}
+                      className={`py-2.5 px-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                        formaDePago === "cuenta_corriente"
+                          ? "bg-brand-red text-white shadow-md shadow-brand-red/20"
+                          : "bg-white/5 border border-white/10 text-zinc-300 hover:bg-white/10"
+                      }`}
+                    >
+                      <ClipboardList className="h-4 w-4 shrink-0" /> Cta. Cte.
+                    </button>
+
+                    {saldoAFavorCliente > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleAplicarSaldoAFavor}
+                        className={`py-2.5 px-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                          formaDePago === "saldo_a_favor"
+                            ? "bg-emerald-500 text-zinc-950 font-bold shadow-md shadow-emerald-500/20"
+                            : "bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20"
+                        }`}
+                      >
+                        <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+                        <span className="truncate">⭐ Saldo</span>
                       </button>
-                    ))}
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => setFormaDePago("mixto")}
+                      className={`py-2.5 px-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                        formaDePago === "mixto"
+                          ? "bg-amber-500 text-zinc-950 font-bold shadow-md shadow-amber-500/20"
+                          : "bg-white/5 border border-white/10 text-zinc-300 hover:bg-white/10"
+                      }`}
+                    >
+                      <Repeat className="h-4 w-4 shrink-0" /> 🔀 Mixto
+                    </button>
                   </div>
                 </div>
-                <div>
-                  <label className="text-xs text-zinc-400 uppercase tracking-widest mb-2 block">
-                    Pago Recibido <span className="text-zinc-600 normal-case">(deja menos para dejar a cuenta)</span>
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-yellow font-bold text-lg">$</span>
-                    <input type="text" value={pago}
-                      onChange={e => setPago(formatPaymentInput(e.target.value))}
-                      className="w-full h-14 rounded-2xl bg-white/5 border border-white/10 pl-10 pr-4 text-xl font-bold outline-none focus:border-brand-red text-white" />
+
+                {/* Banner de Saldo a Favor disponible */}
+                {saldoAFavorCliente > 0 && formaDePago !== "saldo_a_favor" && (
+                  <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-bold text-emerald-400">⭐ Cliente con saldo a favor</p>
+                      <p className="text-sm font-extrabold text-white">
+                        ${saldoAFavorCliente.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAplicarSaldoAFavor}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-zinc-950 font-bold text-xs shadow-md transition-all active:scale-95"
+                    >
+                      ⚡ Usar Saldo
+                    </button>
                   </div>
-                </div>
+                )}
+
+                {/* Si es Pago Mixto: Desglose */}
+                {formaDePago === "mixto" ? (
+                  <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-3">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                      <div className="flex items-center gap-2">
+                        <Repeat className="h-4 w-4 text-amber-400" />
+                        <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">Desglose de Pago Mixto</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPagoEfectivo("");
+                          setPagoTransferencia("");
+                          setPagoCtaCte("");
+                          setPagoSaldoAFavor("");
+                        }}
+                        className="text-[11px] text-zinc-400 hover:text-white underline"
+                      >
+                        Limpiar
+                      </button>
+                    </div>
+
+                    {/* Efectivo */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-zinc-300 w-24 shrink-0 flex items-center gap-1.5 font-medium">
+                        <Banknote className="h-3.5 w-3.5 text-emerald-400" /> Efectivo:
+                      </span>
+                      <div className="relative flex-1">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs">$</span>
+                        <input
+                          type="text"
+                          value={pagoEfectivo}
+                          onChange={e => setPagoEfectivo(formatPaymentInput(e.target.value))}
+                          placeholder="0,00"
+                          className="w-full h-9 rounded-xl bg-white/5 border border-white/10 pl-7 pr-2 text-xs font-bold text-white outline-none focus:border-amber-500"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleLlenarRestante("efectivo")}
+                        className="px-2.5 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-zinc-200 text-[11px] font-semibold shrink-0"
+                      >
+                        Llenar
+                      </button>
+                    </div>
+
+                    {/* Transferencia */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-zinc-300 w-24 shrink-0 flex items-center gap-1.5 font-medium">
+                        <CreditCard className="h-3.5 w-3.5 text-blue-400" /> Transf.:
+                      </span>
+                      <div className="relative flex-1">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs">$</span>
+                        <input
+                          type="text"
+                          value={pagoTransferencia}
+                          onChange={e => setPagoTransferencia(formatPaymentInput(e.target.value))}
+                          placeholder="0,00"
+                          className="w-full h-9 rounded-xl bg-white/5 border border-white/10 pl-7 pr-2 text-xs font-bold text-white outline-none focus:border-amber-500"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleLlenarRestante("transferencia")}
+                        className="px-2.5 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-zinc-200 text-[11px] font-semibold shrink-0"
+                      >
+                        Llenar
+                      </button>
+                    </div>
+
+                    {/* Cuenta Corriente */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-zinc-300 w-24 shrink-0 flex items-center gap-1.5 font-medium">
+                        <ClipboardList className="h-3.5 w-3.5 text-amber-400" /> Cta. Cte.:
+                      </span>
+                      <div className="relative flex-1">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs">$</span>
+                        <input
+                          type="text"
+                          disabled={!selectedClient}
+                          value={pagoCtaCte}
+                          onChange={e => setPagoCtaCte(formatPaymentInput(e.target.value))}
+                          placeholder={selectedClient ? "0,00" : "Requiere cliente"}
+                          className="w-full h-9 rounded-xl bg-white/5 border border-white/10 pl-7 pr-2 text-xs font-bold text-white outline-none focus:border-amber-500 disabled:opacity-40"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        disabled={!selectedClient}
+                        onClick={() => handleLlenarRestante("cta_corriente")}
+                        className="px-2.5 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-zinc-200 text-[11px] font-semibold shrink-0 disabled:opacity-40"
+                      >
+                        Llenar
+                      </button>
+                    </div>
+
+                    {/* Saldo a Favor (si aplica) */}
+                    {saldoAFavorCliente > 0 && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-emerald-300 w-24 shrink-0 flex items-center gap-1.5 font-bold">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" /> A Favor:
+                        </span>
+                        <div className="relative flex-1">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs">$</span>
+                          <input
+                            type="text"
+                            value={pagoSaldoAFavor}
+                            onChange={e => setPagoSaldoAFavor(formatPaymentInput(e.target.value))}
+                            placeholder="0,00"
+                            className="w-full h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 pl-7 pr-2 text-xs font-bold text-emerald-300 outline-none focus:border-emerald-400"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleLlenarRestante("saldo_a_favor")}
+                          className="px-2.5 h-9 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-[11px] font-bold shrink-0 border border-emerald-500/40"
+                        >
+                          Usar
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Resumen Mixto */}
+                    <div className="pt-2 border-t border-white/10 flex items-center justify-between text-xs">
+                      <div className="space-y-0.5">
+                        <p className="text-zinc-400">
+                          Cubierto: <span className="font-bold text-white">${totalCubiertoMixto.toFixed(2)}</span> / ${totalFinal.toFixed(2)}
+                        </p>
+                        {restantePorCubrir > 0 ? (
+                          <p className="text-amber-400 font-bold">Falta cubrir: ${restantePorCubrir.toFixed(2)}</p>
+                        ) : (
+                          <p className="text-emerald-400 font-bold">✓ Total 100% Cubierto</p>
+                        )}
+                      </div>
+                      {vueltoEfectivo > 0 && (
+                        <div className="text-right">
+                          <p className="text-zinc-400">Vuelto en efectivo</p>
+                          <p className="text-sm font-bold text-brand-yellow">${vueltoEfectivo.toFixed(2)}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="text-xs text-zinc-400 uppercase tracking-widest mb-2 block">
+                      {formaDePago === "saldo_a_favor"
+                        ? "Monto a descontar de Saldo a Favor"
+                        : "Pago Recibido"} <span className="text-zinc-600 normal-case">(deja menos para dejar a cuenta)</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-yellow font-bold text-lg">$</span>
+                      <input type="text" value={pago}
+                        onChange={e => setPago(formatPaymentInput(e.target.value))}
+                        className="w-full h-14 rounded-2xl bg-white/5 border border-white/10 pl-10 pr-4 text-xl font-bold outline-none focus:border-brand-red text-white" />
+                    </div>
+                  </div>
+                )}
+
                 <div className={`rounded-2xl p-4 flex justify-between items-center transition-all ${
-                  saldo > 0 ? "bg-red-500/10 border border-red-500/30" :
-                  vuelto > 0 ? "bg-brand-red/10 border border-brand-red/30 animate-pulse" :
-                  "bg-emerald-500/10 border border-emerald-500/30"
+                  formaDePago === "mixto"
+                    ? restantePorCubrir > 0 ? "bg-amber-500/10 border border-amber-500/30" : "bg-emerald-500/10 border border-emerald-500/30"
+                    : saldo > 0 ? "bg-red-500/10 border border-red-500/30"
+                    : vuelto > 0 ? "bg-brand-red/10 border border-brand-red/30 animate-pulse"
+                    : "bg-emerald-500/10 border border-emerald-500/30"
                 }`}>
                   <div>
-                    {saldo > 0 ? (
+                    {formaDePago === "mixto" ? (
+                      restantePorCubrir > 0 ? (
+                        <>
+                          <p className="text-xs text-zinc-400">Falta por asignar</p>
+                          <p className="text-xl font-bold text-amber-300">
+                            -${restantePorCubrir.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                          </p>
+                        </>
+                      ) : vueltoEfectivo > 0 ? (
+                        <>
+                          <p className="text-xs text-brand-yellow">Vuelto a entregar</p>
+                          <p className="text-xl font-bold text-brand-yellow">
+                            ${vueltoEfectivo.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-xs text-zinc-400">Estado</p>
+                          <p className="text-xl font-bold text-emerald-300">Pagado ✓</p>
+                        </>
+                      )
+                    ) : saldo > 0 ? (
                       <>
                         <p className="text-xs text-zinc-400">Queda en cuenta corriente</p>
                         <p className="text-xl font-bold text-red-300">
@@ -993,6 +1400,21 @@ function CheckoutModal({
                     <p className="text-xl font-bold">${totalFinal.toFixed(2)}</p>
                   </div>
                 </div>
+
+                {/* Opción para dejar vuelto como saldo a favor si hay vuelto y cliente */}
+                {((formaDePago === "mixto" ? vueltoEfectivo : vuelto) > 0) && selectedClient && (
+                  <label className="flex items-center gap-2.5 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs font-semibold cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={dejarVueltoComoSaldoAFavor}
+                      onChange={e => setDejarVueltoComoSaldoAFavor(e.target.checked)}
+                      className="h-4 w-4 rounded border-emerald-500/40 bg-zinc-900 text-emerald-500 accent-emerald-500 cursor-pointer"
+                    />
+                    <span>
+                      Dejar vuelto de ${(formaDePago === "mixto" ? vueltoEfectivo : vuelto).toLocaleString('es-AR', { minimumFractionDigits: 2 })} como saldo a favor
+                    </span>
+                  </label>
+                )}
               </>
             )}
             {esPedido && (
@@ -1046,22 +1468,47 @@ function ClienteDetalleModal({ client, token, onClose, onCargarPago }: { client:
             <X className="h-5 w-5 text-zinc-400" />
           </button>
         </div>
-        <div className={`rounded-2xl p-4 flex justify-between items-center mb-5 ${client.balance > 0 ? "bg-red-500/10 border border-red-500/30" : "bg-emerald-500/10 border border-emerald-500/30"}`}>
-          <div>
-            <span className="text-xs font-medium text-zinc-400 block">Saldo total</span>
-            <span className={`text-2xl font-bold ${client.balance > 0 ? "text-red-300" : "text-emerald-300"}`}>
-              {client.balance > 0 ? `-$${client.balance.toLocaleString('es-AR')}` : "Sin deuda ✓"}
-            </span>
-          </div>
-          {client.balance > 0 && (
-            <button
-              onClick={() => onCargarPago(client)}
-              className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-500/20 active:scale-95 text-xs transition-all flex items-center gap-1 shrink-0"
-            >
-              <CircleDollarSign className="h-4 w-4" /> Cargar Pago
-            </button>
-          )}
-        </div>
+        {(() => {
+          const cSaldoAFavor = (client.saldo_a_favor !== undefined && client.saldo_a_favor !== null)
+            ? Number(client.saldo_a_favor)
+            : (client.balance < 0 ? Math.abs(client.balance) : 0);
+          return (
+            <div className={`rounded-2xl p-4 flex justify-between items-center mb-5 ${
+              client.balance > 0 
+                ? "bg-red-500/10 border border-red-500/30" 
+                : cSaldoAFavor > 0
+                ? "bg-emerald-500/15 border border-emerald-500/40" 
+                : "bg-emerald-500/10 border border-emerald-500/30"
+            }`}>
+              <div>
+                <span className="text-xs font-medium text-zinc-400 block">Saldo actual</span>
+                <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                  {client.balance > 0 && (
+                    <span className="text-2xl font-bold text-red-300">
+                      -${client.balance.toLocaleString('es-AR')}
+                    </span>
+                  )}
+                  {cSaldoAFavor > 0 && (
+                    <span className="text-xl font-extrabold text-emerald-400 bg-emerald-500/20 border border-emerald-500/40 px-2.5 py-0.5 rounded-xl">
+                      +${cSaldoAFavor.toLocaleString('es-AR', { minimumFractionDigits: 2 })} a favor
+                    </span>
+                  )}
+                  {client.balance === 0 && cSaldoAFavor === 0 && (
+                    <span className="text-2xl font-bold text-emerald-300">
+                      Sin deuda ✓
+                    </span>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={() => onCargarPago(client)}
+                className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-500/20 active:scale-95 text-xs transition-all flex items-center gap-1.5 shrink-0"
+              >
+                <CircleDollarSign className="h-4 w-4" /> {client.balance > 0 ? "Cargar Pago" : "Cargar Anticipo"}
+              </button>
+            </div>
+          );
+        })()}
         <h3 className="text-xs text-zinc-500 uppercase tracking-widest mb-3">Ãšltimas ventas</h3>
         {loading ? (
           <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-16 rounded-2xl bg-white/5 animate-pulse" />)}</div>
@@ -1312,9 +1759,13 @@ function CargarPagoModal({
             </div>
 
             {vuelto > 0 && (
-              <div className="rounded-2xl p-4 bg-brand-red/10 border border-brand-red/30 text-center animate-pulse">
-                <p className="text-xs text-brand-yellow font-semibold uppercase tracking-wider">Pago excede la deuda</p>
-                <p className="text-xl font-bold text-brand-yellow mt-1">Vuelto a entregar: ${vuelto.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</p>
+              <div className="rounded-2xl p-4 bg-emerald-500/15 border border-emerald-500/40 text-center">
+                <p className="text-xs text-emerald-300 font-bold uppercase tracking-wider">
+                  ⭐ Excedente a Favor: +${vuelto.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                </p>
+                <p className="text-xs text-zinc-300 mt-1">
+                  Este monto excedente se acreditará automáticamente como <strong>Saldo a Favor</strong> en la cuenta de {client.name} para sus próximas compras.
+                </p>
               </div>
             )}
 
@@ -1747,6 +2198,7 @@ export default function BakeryDriverApp() {
   const isVendedor = user?.roles?.some((r: string) => r.toLowerCase() === 'vendedor');
   const isVehiculo1 = user?.roles?.some((r: string) => r.toLowerCase() === 'vehiculo1');
   const isVehiculo2 = user?.roles?.some((r: string) => r.toLowerCase() === 'vehiculo2');
+  const isPreventista = user?.roles?.some((r: string) => r.toLowerCase() === 'preventista');
   const isRepartidor = user?.roles?.some((r: string) => 
     ['repartidor', 'preventista', 'vehiculo1', 'vehiculo2'].includes(r.toLowerCase())
   );
@@ -1875,7 +2327,7 @@ export default function BakeryDriverApp() {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
-  const [historyTab, setHistoryTab] = useState<'movimientos' | 'estadisticas' | 'cierres'>('movimientos');
+  const [historyTab, setHistoryTab] = useState<'movimientos' | 'estadisticas' | 'cierres' | 'tesoreria'>('movimientos');
   const [productStats, setProductStats] = useState<any[]>([]);
   const [clientStats, setClientStats] = useState<{ top_clientes: any[], cambios: any[] } | null>(null);
   const [cierresList, setCierresList] = useState<any[]>([]);
@@ -1909,7 +2361,35 @@ export default function BakeryDriverApp() {
   const [loadingCajaSales, setLoadingCajaSales] = useState(false);
   const [imprimirDoble, setImprimirDoble] = useState(false);
   const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [cajaAsignarUserId, setCajaAsignarUserId] = useState<string | number>("");
+  const [cajerosList, setCajerosList] = useState<any[]>([]);
+  const [cajaTransferenciaReal, setCajaTransferenciaReal] = useState<number | string>("");
+  const [cajaTarjetaReal, setCajaTarjetaReal] = useState<number | string>("");
+  const [cajaMontoRetiro, setCajaMontoRetiro] = useState<number | string>("");
+  const [cajaAcreditarTransf, setCajaAcreditarTransf] = useState(true);
   const historyLoaderRef = useRef<HTMLDivElement | null>(null);
+
+  // ── Tesorería / Caja Mayor state ──
+  const [tesoreriaResumen, setTesoreriaResumen] = useState<{
+    saldo_efectivo: number;
+    saldo_transferencia: number;
+    total_disponible: number;
+    ingresos_mes: number;
+    egresos_mes: number;
+    ultimo_movimiento: any;
+  } | null>(null);
+  const [tesoreriaMovimientos, setTesoreriaMovimientos] = useState<any[]>([]);
+  const [loadingTesoreria, setLoadingTesoreria] = useState(false);
+  const [tesoreriaModal, setTesoreriaModal] = useState<'movimiento' | 'retiro' | null>(null);
+  const [tesoreriaForm, setTesoreriaForm] = useState({
+    tipo: 'ingreso' as 'ingreso' | 'egreso',
+    metodo_pago: 'efectivo' as 'efectivo' | 'transferencia',
+    monto: '',
+    concepto: '',
+    observaciones: '',
+    fecha: '',
+  });
+  const [savingTesoreria, setSavingTesoreria] = useState(false);
 
   // Driver Reservations
   const [misReservas, setMisReservas] = useState<any[]>([]);
@@ -2147,14 +2627,48 @@ export default function BakeryDriverApp() {
     }
   };
 
+  const fetchTesoreria = useCallback(async () => {
+    if (!token) return;
+    setLoadingTesoreria(true);
+    try {
+      const [resResumen, resMovs] = await Promise.all([
+        fetch(`${API_URL}/admin/tesoreria/resumen`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_URL}/admin/tesoreria/movimientos`, { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
+      if (resResumen.ok) setTesoreriaResumen(await resResumen.json());
+      if (resMovs.ok) {
+        const d = await resMovs.json();
+        setTesoreriaMovimientos(d.data || []);
+      }
+    } catch (e) {
+      console.error("Error al obtener datos de tesorería", e);
+    } finally {
+      setLoadingTesoreria(false);
+    }
+  }, [token]);
+
   useEffect(() => {
     if (token) {
       fetchCajaTurno();
       if (historyTab === 'cierres') {
         fetchCierres();
       }
+      if (historyTab === 'tesoreria') {
+        fetchTesoreria();
+      }
     }
-  }, [token, activeTab, historyTab, historyRefresh]);
+  }, [token, activeTab, historyTab, historyRefresh, fetchTesoreria]);
+
+  useEffect(() => {
+    if (isAdmin && cajaTurnoModal === 'abrir' && cajerosList.length === 0 && token) {
+      fetch(`${API_URL}/admin/users`, {
+        headers: { Accept: 'application/json', Authorization: `Bearer ${token}` }
+      })
+        .then(r => r.json())
+        .then(d => { if (Array.isArray(d)) setCajerosList(d); })
+        .catch(console.error);
+    }
+  }, [isAdmin, cajaTurnoModal, cajerosList.length, token]);
 
   const handleAbrirCaja = async () => {
     try {
@@ -2167,13 +2681,15 @@ export default function BakeryDriverApp() {
         },
         body: JSON.stringify({ 
           monto_apertura: cajaMontoApertura || 0,
-          fecha_apertura: cajaFechaApertura 
+          fecha_apertura: cajaFechaApertura,
+          user_id: cajaAsignarUserId || undefined,
         })
       });
       const data = await res.json();
       if (res.ok && data.success) {
         setCajaTurnoActivo(data.caja);
         setCajaTurnoModal(null);
+        setCajaAsignarUserId("");
         setHistoryRefresh(p => p + 1);
         fetchCajaTurno();
       } else {
@@ -2189,9 +2705,32 @@ export default function BakeryDriverApp() {
     }
   };
 
+  const handleOpenCerrarCajaModal = () => {
+    if (cajaTurnoActivo) {
+      const espEf = Number(cajaTurnoActivo.efectivo_esperado || 0);
+      const espTransf = Number(cajaTurnoActivo.ventas_panaderia_transferencia || 0);
+      const espTarj = Number(cajaTurnoActivo.ventas_panaderia_tarjeta || 0);
+      const montoAp = Number(cajaTurnoActivo.monto_apertura || 0);
+
+      setCajaEfectivoReal(espEf > 0 ? espEf : "");
+      setCajaTransferenciaReal(espTransf > 0 ? espTransf : "");
+      setCajaTarjetaReal(espTarj > 0 ? espTarj : "");
+      const defaultRetiro = espEf > montoAp ? (espEf - montoAp) : espEf;
+      setCajaMontoRetiro(defaultRetiro > 0 ? defaultRetiro : "");
+      setCajaAcreditarTransf(true);
+      setCajaObservaciones("");
+    }
+    setCajaTurnoModal('cerrar');
+  };
+
   const handleCerrarCaja = async () => {
     if (!cajaTurnoActivo) return;
     try {
+      const efReal = cajaEfectivoReal !== "" ? parseFloat(String(cajaEfectivoReal)) : 0;
+      const transReal = cajaTransferenciaReal !== "" ? parseFloat(String(cajaTransferenciaReal)) : undefined;
+      const tarjReal = cajaTarjetaReal !== "" ? parseFloat(String(cajaTarjetaReal)) : undefined;
+      const retiro = cajaMontoRetiro !== "" ? parseFloat(String(cajaMontoRetiro)) : efReal;
+
       const res = await fetch(`${API_URL}/admin/cerrar-caja/${cajaTurnoActivo.id}`, {
         method: "POST",
         headers: { 
@@ -2200,17 +2739,23 @@ export default function BakeryDriverApp() {
           Authorization: `Bearer ${token}` 
         },
         body: JSON.stringify({ 
-          efectivo_real: cajaEfectivoReal || 0,
+          efectivo_real: efReal,
+          transferencia_real: transReal,
+          tarjeta_real: tarjReal,
+          monto_retiro: retiro,
+          acreditar_transferencias: cajaAcreditarTransf,
           observaciones: cajaObservaciones
         })
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        alert(`Caja cerrada. Diferencia: $${data.caja.diferencia}`);
+        const fondoQueda = Math.max(0, efReal - retiro);
+        alert(`✅ Caja cerrada exitosamente.\n\n• Diferencia Efectivo: ${Number(data.caja.diferencia) >= 0 ? '+$' : '-$'}${Math.abs(Number(data.caja.diferencia)).toLocaleString('es-AR')}\n• Retirado a Tesorería: $${retiro.toLocaleString('es-AR')}\n• Fondo que queda en cajón: $${fondoQueda.toLocaleString('es-AR')}`);
         setCajaTurnoActivo(null);
         setCajaTurnoModal(null);
         setHistoryRefresh(p => p + 1);
         fetchCajaTurno();
+        if (historyTab === 'tesoreria') fetchTesoreria();
       } else {
         alert(data.message || "Error al cerrar la caja");
       }
@@ -2219,6 +2764,86 @@ export default function BakeryDriverApp() {
       alert("Error al cerrar caja: " + (e?.message || ""));
     }
   };
+
+  const handleRegistrarRetiroCaja = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token || !tesoreriaForm.monto) {
+      alert("Por favor ingresá un monto a retirar");
+      return;
+    }
+    setSavingTesoreria(true);
+    try {
+      const res = await fetch(`${API_URL}/admin/cajas/retiro`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          monto: parseFloat(tesoreriaForm.monto),
+          concepto: tesoreriaForm.concepto,
+          observaciones: tesoreriaForm.observaciones,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert(data.message);
+        setTesoreriaModal(null);
+        setTesoreriaForm({ tipo: 'ingreso', metodo_pago: 'efectivo', monto: '', concepto: '', observaciones: '' });
+        setHistoryRefresh(p => p + 1);
+        fetchCajaTurno();
+        if (historyTab === 'tesoreria') fetchTesoreria();
+      } else {
+        alert(data.message || "Error al registrar retiro");
+      }
+    } catch {
+      alert("Error de conexión");
+    } finally {
+      setSavingTesoreria(false);
+    }
+  };
+
+  const handleGuardarMovimientoTesoreria = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token || !tesoreriaForm.monto || !tesoreriaForm.concepto) {
+      alert("Por favor completá monto y concepto");
+      return;
+    }
+    setSavingTesoreria(true);
+    try {
+      const res = await fetch(`${API_URL}/admin/tesoreria/movimiento`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          tipo: tesoreriaForm.tipo,
+          metodo_pago: tesoreriaForm.metodo_pago,
+          monto: parseFloat(tesoreriaForm.monto),
+          concepto: tesoreriaForm.concepto,
+          observaciones: tesoreriaForm.observaciones,
+          fecha: tesoreriaForm.fecha ? new Date(tesoreriaForm.fecha).toISOString() : new Date().toISOString(),
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert("Movimiento registrado correctamente en Tesorería");
+        setTesoreriaModal(null);
+        setTesoreriaForm({ tipo: 'ingreso', metodo_pago: 'efectivo', monto: '', concepto: '', observaciones: '', fecha: '' });
+        fetchTesoreria();
+      } else {
+        alert(data.message || "Error al registrar movimiento en tesorería");
+      }
+    } catch {
+      alert("Error de conexión");
+    } finally {
+      setSavingTesoreria(false);
+    }
+  };
+
   const [cajaFormaPago, setCajaFormaPago] = useState<string>("");
 
   useEffect(() => {
@@ -2230,10 +2855,8 @@ export default function BakeryDriverApp() {
       setLoadingCajaSales(true);
       try {
         let queryParams = `filter_type=${historyFilterType}&search=${historySearch}&tipo=${historyType}&per_page=1000`;
-        if (selectedCaja.caja_id === 'panaderia' || selectedCaja.tipo_caja === 'panaderia') {
-          queryParams += `&caja_tipo=panaderia`;
-        } else {
-          queryParams += `&caja_tipo=reparto&user_id=${selectedCaja.user_id}`;
+        if (selectedCaja.user_id) {
+          queryParams += `&user_id=${selectedCaja.user_id}`;
         }
         if (cajaFormaPago) queryParams += `&forma_pago=${cajaFormaPago}`;
         if (historyFilterType === 'range') {
@@ -2324,22 +2947,20 @@ export default function BakeryDriverApp() {
   const [posSearch, setPosSearch] = useState("");
 
   const displayedProducts = useMemo(() => {
+    const isRepartoMode = !isVendedor && (!isAdmin || adminPosMode === "reparto");
+
+    let baseList = products;
+    if (isRepartoMode) {
+      baseList = baseList.filter(p => (p as any).disponible_reparto === true || (p as any).disponible_reparto === 1);
+    }
+
     if (posSearch) {
-      return products.filter(p => p.name.toLowerCase().includes(posSearch.toLowerCase()));
+      const q = posSearch.toLowerCase();
+      baseList = baseList.filter(p => p.name.toLowerCase().includes(q));
     }
     
-    let baseList = [...products];
-    if (isAdmin || isVendedor) {
-      return baseList.filter(p => p.quantity > 0).sort((a, b) => (b.sold_qty || 0) - (a.sold_qty || 0)).slice(0, 10);
-    }
-    
-    // Sort in-stock first, keep order stable
-    return baseList.sort((a, b) => {
-      const aHasStock = a.quantity > 0 ? 1 : 0;
-      const bHasStock = b.quantity > 0 ? 1 : 0;
-      return bHasStock - aHasStock;
-    });
-  }, [products, posSearch, isAdmin, isVendedor]);
+    return baseList.sort((a, b) => (b.sold_qty || 0) - (a.sold_qty || 0));
+  }, [products, posSearch, isVendedor, isAdmin, adminPosMode]);
 
   // Checkout state
   const [checkoutOpen, setCheckoutOpen] = useState(false);
@@ -2493,7 +3114,10 @@ export default function BakeryDriverApp() {
   const [paymentClient, setPaymentClient] = useState<Client | null>(null);
 
   // Pedido que se está editando
-  const [editingPedido, setEditingPedido] = useState<{ id: number; cliente: { id: number; name: string } | null } | null>(null);
+  const [editingPedido, setEditingPedido] = useState<{ id: number; cliente: { id: number; name: string } | null; items?: SaleItem[] } | null>(null);
+
+  // Pedido que se está reutilizando (nueva venta/pedido pre-cargado)
+  const [reutilizarPedido, setReutilizarPedido] = useState<{ cliente: { id: number; name: string } | null; items?: SaleItem[] } | null>(null);
 
   useEffect(() => {
     const savedToken = localStorage.getItem("token");
@@ -2552,6 +3176,22 @@ export default function BakeryDriverApp() {
     } catch (err) { console.error(err); }
     finally { if (full) setLoading(false); }
   }, [user]);
+
+  // Auto-refrescar datos al volver a la pestaña (focus) o al ingresar a POS / Personas
+  useEffect(() => {
+    if (!token) return;
+    const handleFocus = () => {
+      fetchAllData(token, false);
+    };
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [token, fetchAllData]);
+
+  useEffect(() => {
+    if (token && (activeTab === "pos" || activeTab === "clientes")) {
+      fetchAllData(token, false);
+    }
+  }, [token, activeTab, fetchAllData]);
 
   const handleInlineAjusteMP = async (id: number, newStock: number) => {
     try {
@@ -2716,7 +3356,7 @@ export default function BakeryDriverApp() {
 
   const updateQuantity = (product: Product, change: number) => {
     setCart(prev => {
-      const maxLimit = isClienteMayorista ? 99999 : product.quantity;
+      const maxLimit = (isClienteMayorista || isPreventista) ? 99999 : product.quantity;
       const next = Math.max(0, Math.min(maxLimit, (prev[product.id] || 0) + change));
       return { ...prev, [product.id]: next };
     });
@@ -2729,7 +3369,7 @@ export default function BakeryDriverApp() {
     }
     const parsed = parseFloat(value.replace(",", "."));
     if (isNaN(parsed)) return;
-    const maxLimit = isClienteMayorista ? 99999 : product.quantity;
+    const maxLimit = (isClienteMayorista || isPreventista) ? 99999 : product.quantity;
     const clamped = Math.max(0, Math.min(maxLimit, Math.round(parsed * 1000) / 1000));
     setCart(prev => ({ ...prev, [product.id]: clamped }));
   };
@@ -2746,22 +3386,42 @@ export default function BakeryDriverApp() {
     if (loadingActionId) return;
     setLoadingActionId(delivery.id);
     try {
-      const res = await fetch(`${API_URL}/pedidos/${delivery.id}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const pedido = await res.json();
-        setPedidoCheckout({
-          id: pedido.id,
-          items: pedido.items,
-          cliente: pedido.customer !== "Consumidor Final"
-            ? { id: pedido.idcliente, name: pedido.customer }
-            : null,
+      let pedido: any = null;
+      try {
+        const res = await fetch(`${API_URL}/pedidos/${delivery.id}`, {
+          headers: { Authorization: `Bearer ${token}` }
         });
-        setCheckoutOpen(true);
+        if (res.ok) {
+          pedido = await res.json();
+        }
+      } catch (e) {
+        console.warn("No se pudo obtener detalle vía API:", e);
       }
-    } catch { alert("Error al cargar pedido"); }
-    finally { setLoadingActionId(null); }
+
+      const items: SaleItem[] = pedido?.items || (delivery.raw_items || []).map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        quantity: r.qty,
+        price: r.price,
+      }));
+
+      const customerName = pedido?.customer || delivery.customer || "Consumidor Final";
+      const idCliente = pedido?.idcliente ?? delivery.idcliente;
+      const clienteData = customerName !== "Consumidor Final"
+        ? { id: idCliente, name: customerName }
+        : null;
+
+      setPedidoCheckout({
+        id: delivery.id,
+        items,
+        cliente: clienteData,
+      });
+      setCheckoutOpen(true);
+    } catch {
+      alert("Error al cargar pedido");
+    } finally {
+      setLoadingActionId(null);
+    }
   };
 
   // Cargar pedido para edición en el POS
@@ -2769,33 +3429,125 @@ export default function BakeryDriverApp() {
     if (loadingActionId) return;
     setLoadingActionId(delivery.id);
     try {
-      const res = await fetch(`${API_URL}/pedidos/${delivery.id}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const pedido = await res.json();
-
-        // Mapear items al carrito
-        const cartMap: Record<number, number> = {};
-        pedido.items.forEach((item: SaleItem) => {
-          cartMap[item.id] = item.quantity;
+      let pedido: any = null;
+      try {
+        const res = await fetch(`${API_URL}/pedidos/${delivery.id}`, {
+          headers: { Authorization: `Bearer ${token}` }
         });
-        setCart(cartMap);
-
-        // Activar modo edición
-        setEditingPedido({
-          id: pedido.id,
-          cliente: pedido.customer !== "Consumidor Final"
-            ? { id: pedido.idcliente, name: pedido.customer }
-            : null,
-        });
-
-        // Redirigir al POS
-        setActiveTab("pos");
+        if (res.ok) {
+          pedido = await res.json();
+        }
+      } catch (e) {
+        console.warn("No se pudo obtener detalle vía API:", e);
       }
+
+      const items: SaleItem[] = pedido?.items || (delivery.raw_items || []).map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        quantity: r.qty,
+        price: r.price,
+      }));
+
+      // Mapear items al carrito
+      const cartMap: Record<number, number> = {};
+      items.forEach((item: SaleItem) => {
+        cartMap[item.id] = item.quantity;
+      });
+      setCart(cartMap);
+
+      const customerName = pedido?.customer || delivery.customer || "Consumidor Final";
+      const idCliente = pedido?.idcliente ?? delivery.idcliente;
+      const clienteData = customerName !== "Consumidor Final"
+        ? { id: idCliente, name: customerName }
+        : null;
+
+      // Activar modo edición
+      setEditingPedido({
+        id: delivery.id,
+        cliente: clienteData,
+        items,
+      });
+
+      // Redirigir al POS Mostrador (admin y vendedor editan desde ahí)
+      setAdminPosMode("mostrador");
+      setActiveTab("pos");
     } catch {
       alert("Error al cargar pedido para edición");
-    } finally { setLoadingActionId(null); }
+    } finally {
+      setLoadingActionId(null);
+    }
+  };
+
+  // Reutilizar un pedido anterior como base para una nueva venta o pedido
+  const handleReutilizarPedido = async (delivery: Delivery) => {
+    if (loadingActionId) return;
+    setLoadingActionId(delivery.id);
+    try {
+      let pedido: any = null;
+      try {
+        const res = await fetch(`${API_URL}/pedidos/${delivery.id}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.ok) {
+          pedido = await res.json();
+        }
+      } catch (e) {
+        console.warn("No se pudo obtener detalle vía API:", e);
+      }
+
+      const items: SaleItem[] = pedido?.items || (delivery.raw_items || []).map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        quantity: r.qty,
+        price: r.price,
+      }));
+
+      const cartMap: Record<number, number> = {};
+      items.forEach((item: SaleItem) => {
+        cartMap[item.id] = Number(item.quantity) || 0;
+      });
+
+      const customerName = pedido?.customer || delivery.customer || "Consumidor Final";
+      const idCliente = pedido?.idcliente ?? delivery.idcliente;
+      const clienteData = customerName !== "Consumidor Final"
+        ? { id: idCliente, name: customerName }
+        : null;
+
+      if (isClienteMayorista) {
+        setCart(cartMap);
+        if (pedido?.notas || delivery.notas) setMayoristaNotas(pedido?.notas || delivery.notas || "");
+        setActiveTab("cargar_pedido");
+        alert(`✅ Se cargaron los ${items.length} productos del Pedido #${delivery.id} en tu carrito. Podés ajustar las cantidades antes de confirmar.`);
+      } else {
+        // Admin, Vendedor, Repartidor o Preventista
+        setCart(cartMap);
+        if (isVendedor || (isAdmin && adminPosMode === "mostrador")) {
+          setEditingPedido(null);
+          setReutilizarPedido({
+            cliente: clienteData,
+            items,
+          });
+          setActiveTab("pos");
+        } else {
+          // Modo Reparto / Preventista
+          setEditingPedido(null);
+          setReutilizarPedido(null);
+          setPedidoCheckout({
+            id: null,
+            cliente: clienteData,
+            items,
+          });
+          setAdminPosMode("reparto");
+          setActiveTab("pos");
+        }
+        alert(`✅ Se reutilizó el Pedido #${delivery.id} de ${customerName}. Podés verificar o ajustar productos y confirmar el nuevo pedido.`);
+      }
+    } catch (err: any) {
+      console.error("Error al reutilizar pedido:", err);
+      alert(`Error al reutilizar el pedido: ${err?.message || "Error inesperado"}`);
+    } finally {
+      setLoadingActionId(null);
+    }
   };
 
   // Cancelar/Eliminar pedido
@@ -3374,6 +4126,36 @@ export default function BakeryDriverApp() {
                 </div>
               </div>
 
+              {/* Acceso Rápido: Repetir Pedido Anterior */}
+              {(deliveries.length > 0 || entregados.length > 0) && (
+                <div className="p-3.5 sm:p-4 rounded-3xl bg-purple-500/10 border border-purple-500/25 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-purple-500/20 text-purple-300 shrink-0">
+                      <Repeat className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold text-white block">
+                        ¿Querés pedir lo mismo que la última vez?
+                      </span>
+                      <span className="text-[11px] text-zinc-400">
+                        Cargá con 1 clic los productos de tu pedido anterior y ajustá las cantidades
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const latest = deliveries[0] || entregados[0];
+                      if (latest) handleReutilizarPedido(latest);
+                    }}
+                    className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-xs flex items-center justify-center gap-2 transition-all shadow-md shadow-purple-900/30 active:scale-95 cursor-pointer shrink-0"
+                  >
+                    <Repeat className="w-3.5 h-3.5" />
+                    <span>Repetir Último Pedido</span>
+                  </button>
+                </div>
+              )}
+
               {/* Parámetros del Pedido: Fecha y Notas */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-4 rounded-3xl border border-white/10 bg-black/40 backdrop-blur-md">
                 <div>
@@ -3421,17 +4203,18 @@ export default function BakeryDriverApp() {
               {/* Catálogo de Productos */}
               {loading ? (
                 <div className="space-y-2">{[1,2,3,4].map(i => <div key={i} className="h-16 rounded-2xl bg-white/5 animate-pulse" />)}</div>
-              ) : products.filter(p => p.name.toLowerCase().includes(mayoristaSearchProd.toLowerCase())).length === 0 ? (
+              ) : products.filter(p => (p as any).disponible_reparto !== false && p.name.toLowerCase().includes(mayoristaSearchProd.toLowerCase())).length === 0 ? (
                 <div className="text-center py-12 border border-dashed border-white/10 rounded-3xl p-6">
                   <Package className="w-10 h-10 text-zinc-600 mx-auto mb-2" />
-                  <p className="text-zinc-400 text-sm">No se encontraron productos disponibles.</p>
+                  <p className="text-zinc-400 text-sm">No se encontraron productos disponibles para reparto.</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                   {products
-                    .filter(p => p.name.toLowerCase().includes(mayoristaSearchProd.toLowerCase()))
+                    .filter(p => (p as any).disponible_reparto !== false && p.name.toLowerCase().includes(mayoristaSearchProd.toLowerCase()))
                     .map(product => {
                       const qty = cart[product.id] || 0;
+                      const esHabitual = !!(product as any).es_habitual;
                       return (
                         <div
                           key={product.id}
@@ -3440,7 +4223,14 @@ export default function BakeryDriverApp() {
                           }`}
                         >
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold truncate text-white">{product.name}</p>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <p className="text-sm font-semibold truncate text-white">{product.name}</p>
+                              {esHabitual && (
+                                <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1.5 py-0.5 rounded-full font-bold shrink-0">
+                                  ⭐ Habitual
+                                </span>
+                              )}
+                            </div>
                             <div className="flex items-center gap-2 mt-0.5">
                               <span className="text-base font-bold text-brand-yellow">
                                 ${product.price}
@@ -3607,6 +4397,10 @@ export default function BakeryDriverApp() {
                 posMode={adminPosMode}
                 onTogglePosMode={setAdminPosMode}
                 onVentaExitosa={() => fetchAllData(token!, false)}
+                editingPedido={editingPedido}
+                onEditFinished={() => { setCart({}); setEditingPedido(null); }}
+                reutilizarPedido={reutilizarPedido}
+                onReutilizarFinished={() => { setCart({}); setReutilizarPedido(null); }}
               />
             ) : (
               <div className="space-y-4">
@@ -3651,6 +4445,22 @@ export default function BakeryDriverApp() {
                   <button onClick={() => { setCart({}); setEditingPedido(null); }}
                     className="bg-white/5 border border-white/10 hover:bg-white/10 text-xs font-semibold px-3 py-2 rounded-xl text-zinc-300 transition-all active:scale-95">
                     Cancelar
+                  </button>
+                </div>
+              )}
+              {pedidoCheckout?.cliente && !editingPedido && (
+                <div className="rounded-2xl border border-purple-500/30 bg-purple-500/10 p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Repeat className="h-5 w-5 text-purple-300 shrink-0" />
+                    <div>
+                      <p className="text-xs text-purple-300 font-bold uppercase tracking-wider">Pedido Reutilizado</p>
+                      <p className="text-sm font-semibold text-white">Cliente: {pedidoCheckout.cliente.name}</p>
+                      <p className="text-xs text-zinc-400">Podés ajustar o sumar productos antes de cobrar</p>
+                    </div>
+                  </div>
+                  <button onClick={() => { setCart({}); setPedidoCheckout(null); }}
+                    className="bg-white/5 border border-white/10 hover:bg-white/10 text-xs font-semibold px-3 py-2 rounded-xl text-zinc-300 transition-all active:scale-95">
+                    Limpiar
                   </button>
                 </div>
               )}
@@ -3699,7 +4509,7 @@ export default function BakeryDriverApp() {
                       <SortableContext items={displayedProducts.map(p => p.id)} strategy={rectSortingStrategy}>
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                           {displayedProducts.map(product => {
-                            const disabled = product.quantity === 0;
+                            const disabled = !isPreventista && product.quantity === 0;
                             const qty = cart[product.id] || 0;
                             return (
                               <SortableProductItem
@@ -3719,7 +4529,7 @@ export default function BakeryDriverApp() {
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                       {displayedProducts.map(product => {
-                        const disabled = product.quantity === 0;
+                        const disabled = !isPreventista && product.quantity === 0;
                         const qty = cart[product.id] || 0;
                         return (
                           <div key={product.id}
@@ -4101,6 +4911,15 @@ export default function BakeryDriverApp() {
                                           <Download className="h-3.5 w-3.5" />
                                           <span>Remito</span>
                                         </button>
+
+                                        <button
+                                          type="button"
+                                          onClick={() => handleReutilizarPedido(delivery)}
+                                          className="flex items-center gap-1.5 rounded-xl bg-purple-500/10 border border-purple-500/20 px-2.5 sm:px-3 py-2 hover:bg-purple-500/20 active:scale-95 text-purple-300 text-xs font-semibold"
+                                          title="Repetir / Reutilizar este pedido">
+                                          <Repeat className="h-3.5 w-3.5" />
+                                          <span className="hidden xs:inline">Repetir</span>
+                                        </button>
                                       </div>
 
                                       <div className="flex items-center gap-1.5 sm:gap-2">
@@ -4180,6 +4999,16 @@ export default function BakeryDriverApp() {
                                 <Download className="h-3.5 w-3.5" />
                                 <span className="hidden sm:inline">Remito</span>
                               </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleReutilizarPedido(delivery)}
+                                className="flex items-center gap-1 rounded-xl bg-purple-500/10 border border-purple-500/20 px-2.5 sm:px-3 py-2 text-xs font-semibold hover:bg-purple-500/20 active:scale-95 text-purple-300"
+                                title="Repetir / Reutilizar este pedido">
+                                <Repeat className="h-3.5 w-3.5" />
+                                <span>Repetir</span>
+                              </button>
+
                               {!isClienteMayorista && (
                                 <>
                                   <button onClick={() => handleEditarPedido(delivery)} disabled={loadingActionId === delivery.id}
@@ -4430,6 +5259,15 @@ export default function BakeryDriverApp() {
                                           <Download className="h-3.5 w-3.5" />
                                           <span>Descargar Remito</span>
                                         </button>
+
+                                        <button
+                                          type="button"
+                                          onClick={() => handleReutilizarPedido(delivery)}
+                                          className="flex items-center gap-1.5 rounded-xl bg-purple-500/10 border border-purple-500/20 px-2.5 sm:px-3 py-2 hover:bg-purple-500/20 active:scale-95 text-purple-300 text-xs font-semibold"
+                                          title="Repetir / Reutilizar este pedido">
+                                          <Repeat className="h-3.5 w-3.5" />
+                                          <span>Repetir Pedido</span>
+                                        </button>
                                       </div>
 
                                       <div className="flex items-center gap-2 ml-auto">
@@ -4496,6 +5334,15 @@ export default function BakeryDriverApp() {
                                 title="Descargar remito">
                                 <Download className="h-3.5 w-3.5" />
                                 <span className="hidden sm:inline">Remito</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleReutilizarPedido(delivery)}
+                                className="flex items-center gap-1.5 rounded-xl bg-purple-500/10 border border-purple-500/20 px-2.5 sm:px-3 py-2 hover:bg-purple-500/20 active:scale-95 text-purple-300 text-xs font-semibold"
+                                title="Repetir / Reutilizar este pedido">
+                                <Repeat className="h-3.5 w-3.5" />
+                                <span>Repetir</span>
                               </button>
 
                               <span className="inline-flex items-center gap-1 px-3 py-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl text-xs font-bold">
@@ -5435,10 +6282,32 @@ export default function BakeryDriverApp() {
                               <h3 className="text-sm font-semibold truncate text-white">{client.name}</h3>
                               <p className="text-[11px] text-zinc-400 mt-0.5 truncate">{client.address || "Sin dirección"}</p>
                             </div>
-                            <div className="flex items-center gap-3 shrink-0">
-                              <div className={`rounded-xl px-3 py-1.5 text-xs font-bold ${client.balance > 0 ? "bg-red-500/20 text-red-300" : "bg-emerald-500/20 text-emerald-300"}`}>
-                                {client.balance > 0 ? `-$${client.balance.toLocaleString('es-AR')}` : "OK"}
-                              </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              {client.balance > 0 && (
+                                <div className="rounded-xl px-2.5 py-1.5 text-xs font-bold bg-red-500/20 text-red-300 border border-red-500/30">
+                                  -${client.balance.toLocaleString('es-AR')}
+                                </div>
+                              )}
+                              {(() => {
+                                const cSaldo = (client.saldo_a_favor !== undefined && client.saldo_a_favor !== null)
+                                  ? Number(client.saldo_a_favor)
+                                  : (client.balance < 0 ? Math.abs(client.balance) : 0);
+                                if (cSaldo > 0) {
+                                  return (
+                                    <div className="rounded-xl px-2.5 py-1.5 text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                      +${cSaldo.toLocaleString('es-AR', { minimumFractionDigits: 2 })} a favor
+                                    </div>
+                                  );
+                                }
+                                if (client.balance === 0) {
+                                  return (
+                                    <div className="rounded-xl px-2.5 py-1.5 text-xs font-bold bg-emerald-500/10 text-emerald-300">
+                                      Al día ✓
+                                    </div>
+                                  );
+                                }
+                                return null;
+                              })()}
                               <ChevronRight className="h-4 w-4 text-zinc-500" />
                             </div>
                           </button>
@@ -6021,24 +6890,24 @@ export default function BakeryDriverApp() {
           {activeTab === "ventas" && (
             <div className="space-y-4">
               
-              {/* Banner de Mi Turno / Caja (Solo visible para perfil Vendedor) */}
-              {isVendedor && (
+              {/* Banner de Mi Turno / Caja (Visible para Vendedor y Admin) */}
+              {(isVendedor || isAdmin) && (
                 <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
                   <div>
                     <h3 className="font-bold text-white flex items-center gap-2">
                       {cajaTurnoActivo ? <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" /> : <span className="w-2 h-2 rounded-full bg-red-500" />}
-                      {cajaTurnoActivo ? "Caja Abierta" : "Caja Cerrada"}
+                      {cajaTurnoActivo ? "Caja de Mostrador Abierta" : "Caja de Mostrador Cerrada"}
                     </h3>
                     <p className="text-sm text-zinc-400">
                       {cajaTurnoActivo 
-                        ? `Abierta hoy a las ${new Date(cajaTurnoActivo.fecha_apertura).toLocaleTimeString('es-AR', {hour: '2-digit', minute:'2-digit'})} hs`
-                        : "La caja se encuentra cerrada. Puedes abrirla para registrar el monto inicial."}
+                        ? `Turno activo · Abierta por ${cajaTurnoActivo.user?.name || 'Cajero'} a las ${new Date(cajaTurnoActivo.fecha_apertura).toLocaleTimeString('es-AR', {hour: '2-digit', minute:'2-digit'})} hs`
+                        : "La caja se encuentra cerrada. Podés abrirla ingresando el monto inicial de cambio."}
                     </p>
                   </div>
-                  <div>
+                  <div className="flex items-center gap-2 flex-wrap">
                     {cajaTurnoActivo ? (
-                      <button onClick={() => setCajaTurnoModal('cerrar')} className="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 rounded-xl font-bold text-sm transition-colors">
-                        Cerrar Caja
+                      <button onClick={handleOpenCerrarCajaModal} className="px-5 py-2.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 rounded-xl font-bold text-xs sm:text-sm transition-all active:scale-95 flex items-center gap-2">
+                        <CircleDollarSign className="w-4 h-4" /> Cerrar Caja
                       </button>
                     ) : (
                       <button onClick={() => {
@@ -6046,7 +6915,7 @@ export default function BakeryDriverApp() {
                         const now = new Date();
                         const tzOffset = now.getTimezoneOffset() * 60000;
                         setCajaFechaApertura(new Date(Date.now() - tzOffset).toISOString().slice(0, 16));
-                      }} className="px-4 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/30 rounded-xl font-bold text-sm transition-colors">
+                      }} className="px-4 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/30 rounded-xl font-bold text-xs sm:text-sm transition-colors active:scale-95">
                         Abrir Caja
                       </button>
                     )}
@@ -6056,73 +6925,99 @@ export default function BakeryDriverApp() {
 
               <div className="flex flex-col gap-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <h1 className="text-2xl font-bold">Historial {isAdmin ? "(Admin)" : ""}</h1>
-                  
-                  {/* Selector de tipo de filtro */}
-                  <div className="flex bg-black/20 p-1 rounded-xl border border-white/5 self-start sm:self-auto">
-                    {(['day', 'range', 'month'] as const).map((t) => (
-                      <button
-                        key={t}
-                        onClick={() => { setHistoryFilterType(t); setHistoryPage(1); }}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                          historyFilterType === t ? 'bg-brand-red text-white' : 'text-zinc-400 hover:text-zinc-200'
-                        }`}
-                      >
-                        {t === 'day' ? 'Día' : t === 'range' ? 'Período' : 'Mes'}
-                      </button>
-                    ))}
+                  <div>
+                    <h1 className="text-2xl font-bold">
+                      {isAdmin ? "Historial (Admin)" : isVendedor ? "Ventas de tu Turno" : "Tus Ventas"}
+                    </h1>
+                    {isVendedor && (
+                      <div className="text-xs text-zinc-400 mt-1 flex items-center gap-2 flex-wrap">
+                        {cajaTurnoActivo ? (
+                          <>
+                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                            <span className="text-emerald-300 font-semibold">Turno en curso</span>
+                            <span>· Iniciado a las <strong>{new Date(cajaTurnoActivo.fecha_apertura).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })} hs</strong></span>
+                            <span>· Cajero: <strong className="text-zinc-200">{cajaTurnoActivo.user?.name || user?.name}</strong></span>
+                            <span>· Fondo inicial: <strong className="text-emerald-400 font-mono">${Number(cajaTurnoActivo.monto_apertura || 0).toLocaleString('es-AR')}</strong></span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="w-2.5 h-2.5 rounded-full bg-zinc-500 shrink-0" />
+                            <span className="text-zinc-400 font-medium">Caja cerrada actualmente. Abrí un turno para registrar y contabilizar ventas.</span>
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
-                </div>
-
-                {/* Controles de fecha según el tipo de filtro */}
-                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                  {historyFilterType === 'day' && (
-                    <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2 focus-within:border-brand-red transition-colors w-full sm:w-60">
-                      <Calendar className="w-4 h-4 text-brand-yellow shrink-0" />
-                      <input
-                        type="date"
-                        value={historyDate}
-                        onChange={(e) => { setHistoryDate(e.target.value); setHistoryPage(1); }}
-                        className="bg-transparent text-sm font-semibold outline-none text-white w-full [&::-webkit-calendar-picker-indicator]:invert"
-                      />
-                    </div>
-                  )}
-
-                  {historyFilterType === 'range' && (
-                    <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-                      <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2 focus-within:border-brand-red transition-colors w-full sm:w-48">
-                        <span className="text-xs text-zinc-500 font-semibold shrink-0">Desde:</span>
-                        <input
-                          type="date"
-                          value={historyStartDate}
-                          onChange={(e) => { setHistoryStartDate(e.target.value); setHistoryPage(1); }}
-                          className="bg-transparent text-sm font-semibold outline-none text-white w-full [&::-webkit-calendar-picker-indicator]:invert"
-                        />
-                      </div>
-                      <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2 focus-within:border-brand-red transition-colors w-full sm:w-48">
-                        <span className="text-xs text-zinc-500 font-semibold shrink-0">Hasta:</span>
-                        <input
-                          type="date"
-                          value={historyEndDate}
-                          onChange={(e) => { setHistoryEndDate(e.target.value); setHistoryPage(1); }}
-                          className="bg-transparent text-sm font-semibold outline-none text-white w-full [&::-webkit-calendar-picker-indicator]:invert"
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {historyFilterType === 'month' && (
-                    <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2 focus-within:border-brand-red transition-colors w-full sm:w-60">
-                      <Calendar className="w-4 h-4 text-brand-yellow shrink-0" />
-                      <input
-                        type="month"
-                        value={historyMonthYear}
-                        onChange={(e) => { setHistoryMonthYear(e.target.value); setHistoryPage(1); }}
-                        className="bg-transparent text-sm font-semibold outline-none text-white w-full [&::-webkit-calendar-picker-indicator]:invert"
-                      />
+                  
+                  {/* Selector de tipo de filtro (solo para Admin y Preventistas, no vendedor de mostrador) */}
+                  {!isVendedor && (
+                    <div className="flex bg-black/20 p-1 rounded-xl border border-white/5 self-start sm:self-auto">
+                      {(['day', 'range', 'month'] as const).map((t) => (
+                        <button
+                          key={t}
+                          onClick={() => { setHistoryFilterType(t); setHistoryPage(1); }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                            historyFilterType === t ? 'bg-brand-red text-white' : 'text-zinc-400 hover:text-zinc-200'
+                          }`}
+                        >
+                          {t === 'day' ? 'Día' : t === 'range' ? 'Período' : 'Mes'}
+                        </button>
+                      ))}
                     </div>
                   )}
                 </div>
+
+                {/* Controles de fecha según el tipo de filtro (solo si no es Vendedor) */}
+                {!isVendedor && (
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                    {historyFilterType === 'day' && (
+                      <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2 focus-within:border-brand-red transition-colors w-full sm:w-60">
+                        <Calendar className="w-4 h-4 text-brand-yellow shrink-0" />
+                        <input
+                          type="date"
+                          value={historyDate}
+                          onChange={(e) => { setHistoryDate(e.target.value); setHistoryPage(1); }}
+                          className="bg-transparent text-sm font-semibold outline-none text-white w-full [&::-webkit-calendar-picker-indicator]:invert"
+                        />
+                      </div>
+                    )}
+
+                    {historyFilterType === 'range' && (
+                      <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+                        <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2 focus-within:border-brand-red transition-colors w-full sm:w-48">
+                          <span className="text-xs text-zinc-500 font-semibold shrink-0">Desde:</span>
+                          <input
+                            type="date"
+                            value={historyStartDate}
+                            onChange={(e) => { setHistoryStartDate(e.target.value); setHistoryPage(1); }}
+                            className="bg-transparent text-sm font-semibold outline-none text-white w-full [&::-webkit-calendar-picker-indicator]:invert"
+                          />
+                        </div>
+                        <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2 focus-within:border-brand-red transition-colors w-full sm:w-48">
+                          <span className="text-xs text-zinc-500 font-semibold shrink-0">Hasta:</span>
+                          <input
+                            type="date"
+                            value={historyEndDate}
+                            onChange={(e) => { setHistoryEndDate(e.target.value); setHistoryPage(1); }}
+                            className="bg-transparent text-sm font-semibold outline-none text-white w-full [&::-webkit-calendar-picker-indicator]:invert"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {historyFilterType === 'month' && (
+                      <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2 focus-within:border-brand-red transition-colors w-full sm:w-60">
+                        <Calendar className="w-4 h-4 text-brand-yellow shrink-0" />
+                        <input
+                          type="month"
+                          value={historyMonthYear}
+                          onChange={(e) => { setHistoryMonthYear(e.target.value); setHistoryPage(1); }}
+                          className="bg-transparent text-sm font-semibold outline-none text-white w-full [&::-webkit-calendar-picker-indicator]:invert"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {isAdmin && (
@@ -6158,6 +7053,10 @@ export default function BakeryDriverApp() {
                     className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${historyTab === 'cierres' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'text-zinc-500 hover:text-zinc-300'}`}>
                     <Archive className="w-4 h-4" /> Cierres de Caja
                   </button>
+                  <button onClick={() => { setHistoryTab('tesoreria'); fetchTesoreria(); }}
+                    className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${historyTab === 'tesoreria' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'text-zinc-500 hover:text-zinc-300'}`}>
+                    <Building2 className="w-4 h-4" /> Tesorería (Caja Mayor)
+                  </button>
                 </div>
               )}
 
@@ -6166,27 +7065,37 @@ export default function BakeryDriverApp() {
                   {isAdmin && historyCajas.length > 0 && (
                     <div className="mb-6 space-y-3">
                       <div className="flex items-center justify-between">
-                        <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider">Cajas (Panadería y Móviles)</h3>
+                        <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider">Cajas por Usuario</h3>
                         <span className="text-xs text-zinc-500 font-medium">{historyCajas.length} activas</span>
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {historyCajas.map((caja: any) => {
                           const isPanaderia = caja.tipo_caja === 'panaderia';
+                          const rolTag = caja.rol_tag || (isPanaderia ? 'Mostrador' : 'Reparto');
+                          const isAdminUser = rolTag === 'Admin';
+                          const isRepartoUser = rolTag?.startsWith('Móvil') || rolTag === 'Repartidor';
+
                           return (
                             <div
                               key={caja.caja_id || caja.user_id}
                               onClick={() => setSelectedCaja(caja)}
                               className={`rounded-2xl border p-4 space-y-2 cursor-pointer transition-all active:scale-[0.98] ${
-                                isPanaderia 
-                                  ? 'border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10 hover:border-amber-500/50' 
-                                  : 'border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20'
+                                isAdminUser 
+                                  ? 'border-purple-500/30 bg-purple-500/5 hover:bg-purple-500/10 hover:border-purple-500/50' 
+                                  : isRepartoUser
+                                  ? 'border-blue-500/30 bg-blue-500/5 hover:bg-blue-500/10 hover:border-blue-500/50'
+                                  : 'border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10 hover:border-amber-500/50'
                               }`}>
                               <div className="flex justify-between items-center mb-2 pb-2 border-b border-white/10">
                                 <p className="font-bold text-white truncate">{caja.user_name}</p>
                                 <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
-                                  isPanaderia ? 'bg-amber-400/20 text-amber-300' : 'bg-blue-400/20 text-blue-300'
+                                  isAdminUser 
+                                    ? 'bg-purple-400/20 text-purple-300 border border-purple-400/30' 
+                                    : isRepartoUser
+                                    ? 'bg-blue-400/20 text-blue-300 border border-blue-400/30'
+                                    : 'bg-amber-400/20 text-amber-300 border border-amber-400/30'
                                 }`}>
-                                  {isPanaderia ? 'Local / Mostrador' : 'Móvil / Reparto'}
+                                  {rolTag}
                                 </span>
                               </div>
                               <div className="flex justify-between items-center text-sm">
@@ -6226,7 +7135,7 @@ export default function BakeryDriverApp() {
                   {/* Resumen General */}
                   <div className="mb-6">
                     <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-3">
-                      {isAdmin ? 'Totales Generales' : 'Tu Caja'}
+                      {isAdmin ? 'Totales Generales' : (isVendedor ? 'Totales de tu Turno' : 'Tu Caja')}
                     </h3>
                     <div className="grid grid-cols-2 gap-3">
                       <div 
@@ -6342,8 +7251,8 @@ export default function BakeryDriverApp() {
                                 {isSalida
                                   ? `${v.hora} · ${v.tipo === 'pago_proveedor' ? 'Pago a Proveedor' : 'Salida'} · ${v.forma_pago || 'Efectivo'}${v.descripcion ? ` · ${v.descripcion}` : ''}`
                                   : isCobro
-                                    ? `${v.hora} · Cobro · Efectivo`
-                                    : `${v.hora} · ${v.tipo === "pedido" ? "Pedido" : "Venta"} · ${v.forma_pago || 'Efectivo'}`
+                                    ? `${v.hora} · Cobro · Efectivo${v.user_name ? ` · Por: ${v.user_name}` : ''}`
+                                    : `${v.hora} · ${v.tipo === "pedido" ? "Pedido" : "Venta"} · ${v.forma_pago === 'mixto' ? 'Pago Mixto' : (v.forma_pago || 'Efectivo')}${v.user_name ? ` · Por: ${v.user_name}` : ''}`
                                 }
                               </p>
                             </div>
@@ -6471,19 +7380,32 @@ export default function BakeryDriverApp() {
                     </>
                   )}
                 </div>
-              ) : (
+              ) : historyTab === 'cierres' ? (
                 /* ── Sub-tab Cierres de Caja ── */
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
                       <h3 className="text-base font-bold text-white">Historial de Cierres de Caja</h3>
                       <p className="text-xs text-zinc-400">Control de turnos, arqueos de mostrador y diferencias de efectivo.</p>
                     </div>
-                    <button onClick={fetchCierres} disabled={loadingCierres}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs font-semibold text-zinc-300 transition-colors">
-                      <RefreshCw className={`w-3.5 h-3.5 ${loadingCierres ? 'animate-spin' : ''}`} />
-                      Actualizar
-                    </button>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {cajaTurnoActivo ? (
+                        <button onClick={() => setCajaTurnoModal('cerrar')}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded-xl text-xs font-semibold text-red-300 transition-colors">
+                          Cerrar Caja Activa
+                        </button>
+                      ) : (
+                        <button onClick={() => { setCajaFechaApertura(new Date().toISOString().slice(0, 16)); setCajaTurnoModal('abrir'); }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-xl text-xs font-semibold text-emerald-300 transition-colors">
+                          <Plus className="w-3.5 h-3.5" /> Abrir Turno
+                        </button>
+                      )}
+                      <button onClick={fetchCierres} disabled={loadingCierres}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs font-semibold text-zinc-300 transition-colors">
+                        <RefreshCw className={`w-3.5 h-3.5 ${loadingCierres ? 'animate-spin' : ''}`} />
+                        Actualizar
+                      </button>
+                    </div>
                   </div>
 
                   {loadingCierres && cierresList.length === 0 ? (
@@ -6562,6 +7484,154 @@ export default function BakeryDriverApp() {
                     </div>
                   )}
                 </div>
+              ) : (
+                /* ── Sub-tab Tesorería / Caja Mayor ── */
+                <div className="space-y-6">
+                  {/* Header & Acciones */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-base font-bold text-white flex items-center gap-2">
+                        <Building2 className="w-5 h-5 text-amber-400" /> Tesorería Central (Caja Mayor)
+                      </h3>
+                      <p className="text-xs text-zinc-400">Fondos acumulados de bóveda física, transferencias y alivios de turnos de mostrador.</p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        onClick={() => {
+                          const now = new Date();
+                          const tzOffset = now.getTimezoneOffset() * 60000;
+                          const defaultFecha = new Date(Date.now() - tzOffset).toISOString().slice(0, 16);
+                          setTesoreriaForm({ tipo: 'ingreso', metodo_pago: 'efectivo', monto: '', concepto: '', observaciones: '', fecha: defaultFecha });
+                          setTesoreriaModal('movimiento');
+                        }}
+                        className="flex items-center gap-1.5 px-3.5 py-2 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 rounded-xl text-xs font-bold text-amber-300 transition-colors"
+                      >
+                        <Plus className="w-4 h-4" /> Movimiento Manual
+                      </button>
+                      <button onClick={fetchTesoreria} disabled={loadingTesoreria}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs font-semibold text-zinc-300 transition-colors">
+                        <RefreshCw className={`w-3.5 h-3.5 ${loadingTesoreria ? 'animate-spin' : ''}`} />
+                        Actualizar
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Resumen de Fondos (KPI Cards) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    {/* Efectivo en Bóveda */}
+                    <div className="bg-gradient-to-br from-emerald-500/10 to-transparent border border-emerald-500/20 rounded-2xl p-4">
+                      <div className="flex items-center justify-between text-emerald-400 mb-2">
+                        <span className="text-xs font-bold uppercase tracking-wider">Efectivo en Bóveda</span>
+                        <Banknote className="w-5 h-5 opacity-80" />
+                      </div>
+                      <p className="text-2xl font-black text-white font-mono">
+                        ${Number(tesoreriaResumen?.saldo_efectivo || 0).toLocaleString('es-AR')}
+                      </p>
+                      <p className="text-[11px] text-zinc-400 mt-1">Caja fuerte / Bóveda física</p>
+                    </div>
+
+                    {/* Bancos / Cuentas */}
+                    <div className="bg-gradient-to-br from-blue-500/10 to-transparent border border-blue-500/20 rounded-2xl p-4">
+                      <div className="flex items-center justify-between text-blue-400 mb-2">
+                        <span className="text-xs font-bold uppercase tracking-wider">Transferencias / Bancos</span>
+                        <CreditCard className="w-5 h-5 opacity-80" />
+                      </div>
+                      <p className="text-2xl font-black text-white font-mono">
+                        ${Number(tesoreriaResumen?.saldo_transferencia || 0).toLocaleString('es-AR')}
+                      </p>
+                      <p className="text-[11px] text-zinc-400 mt-1">Fondos en cuentas bancarias</p>
+                    </div>
+
+                    {/* Total Disponible */}
+                    <div className="bg-gradient-to-br from-amber-500/15 to-transparent border border-amber-500/30 rounded-2xl p-4 sm:col-span-2 lg:col-span-1">
+                      <div className="flex items-center justify-between text-amber-400 mb-2">
+                        <span className="text-xs font-bold uppercase tracking-wider">Total Disponible</span>
+                        <Building2 className="w-5 h-5 opacity-80" />
+                      </div>
+                      <p className="text-2xl font-black text-amber-300 font-mono">
+                        ${Number(tesoreriaResumen?.total_disponible || 0).toLocaleString('es-AR')}
+                      </p>
+                      <p className="text-[11px] text-zinc-400 mt-1">Suma total de tesorería central</p>
+                    </div>
+
+                    {/* Flujo Mensual */}
+                    <div className="bg-white/5 border border-white/10 rounded-2xl p-4 sm:col-span-2 lg:col-span-1">
+                      <div className="flex items-center justify-between text-zinc-400 mb-2">
+                        <span className="text-xs font-bold uppercase tracking-wider">Movimientos del Mes</span>
+                        <Clock className="w-5 h-5 opacity-80" />
+                      </div>
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-emerald-400 font-semibold font-mono">+${Number(tesoreriaResumen?.ingresos_mes || 0).toLocaleString('es-AR')}</span>
+                        <span className="text-red-400 font-semibold font-mono">-${Number(tesoreriaResumen?.egresos_mes || 0).toLocaleString('es-AR')}</span>
+                      </div>
+                      <p className="text-[11px] text-zinc-500 mt-1">Ingresos vs Egresos del mes actual</p>
+                    </div>
+                  </div>
+
+                  {/* Tabla / Lista de Movimientos */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-bold text-zinc-300 uppercase tracking-wider">Libro de Tesorería</h4>
+                      <span className="text-xs text-zinc-500">{tesoreriaMovimientos.length} movimientos</span>
+                    </div>
+
+                    {loadingTesoreria && tesoreriaMovimientos.length === 0 ? (
+                      <div className="flex justify-center py-12"><RefreshCw className="w-6 h-6 text-brand-red animate-spin" /></div>
+                    ) : tesoreriaMovimientos.length === 0 ? (
+                      <div className="text-center py-12 border border-white/5 bg-white/5 rounded-2xl">
+                        <Building2 className="w-8 h-8 text-zinc-500 mx-auto mb-2 opacity-50" />
+                        <p className="text-sm font-semibold text-zinc-400">No hay movimientos en Tesorería todavía.</p>
+                        <p className="text-xs text-zinc-600 mt-1">Los cierres de caja con entrega física y los retiros de turno se registrarán automáticamente aquí.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {tesoreriaMovimientos.map((mov: any) => {
+                          const isIngreso = mov.tipo === 'ingreso';
+                          const isEfectivo = mov.metodo_pago === 'efectivo';
+                          const fechaStr = new Date(mov.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                          const horaStr = new Date(mov.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+
+                          return (
+                            <div key={mov.id} className="bg-white/5 hover:bg-white/[0.08] border border-white/10 rounded-2xl p-4 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                              <div className="flex items-start gap-3">
+                                <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${isIngreso ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                                  {isIngreso ? <Plus className="w-5 h-5" /> : <Minus className="w-5 h-5" />}
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-bold text-white text-sm">{mov.concepto}</span>
+                                    <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${isEfectivo ? 'bg-emerald-500/20 text-emerald-300' : 'bg-blue-500/20 text-blue-300'}`}>
+                                      {isEfectivo ? '💵 Efectivo' : '🏦 Transf.'}
+                                    </span>
+                                    {mov.origen && (
+                                      <span className="text-[10px] bg-white/10 text-zinc-400 px-2 py-0.5 rounded-full">
+                                        {mov.origen === 'cierre_caja' ? 'Cierre de Turno' : mov.origen === 'retiro_caja' ? 'Alivio de Caja' : mov.origen}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2 text-xs text-zinc-400 mt-1 flex-wrap">
+                                    <span>{fechaStr} · {horaStr} hs</span>
+                                    {mov.user?.name && <span>· Por: <strong className="text-zinc-300">{mov.user.name}</strong></span>}
+                                    {mov.observaciones && <span className="italic text-zinc-500">· "{mov.observaciones}"</span>}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="text-right sm:shrink-0 pl-12 sm:pl-0">
+                                <p className={`text-base font-black font-mono ${isIngreso ? 'text-emerald-400' : 'text-red-400'}`}>
+                                  {isIngreso ? '+' : '-'}${Number(mov.monto).toLocaleString('es-AR')}
+                                </p>
+                                <p className="text-[11px] text-zinc-500">
+                                  Saldo: <strong className="text-zinc-300 font-mono">${Number(mov.saldo_posterior || 0).toLocaleString('es-AR')}</strong>
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
               )}
             </div>
           )}
@@ -6603,7 +7673,7 @@ export default function BakeryDriverApp() {
                         items: [],
                         cliente: editingPedido.cliente,
                       });
-                    } else {
+                    } else if (!pedidoCheckout) {
                       setPedidoCheckout(null);
                     }
                     setCheckoutOpen(true);
@@ -7343,7 +8413,8 @@ export default function BakeryDriverApp() {
                     selectedVenta.tipo === 'salida' ? 'Salida de Caja' :
                     selectedVenta.tipo === 'cobro_cuenta' ? 'Cobro' :
                     selectedVenta.tipo === 'pedido' ? 'Pedido' : 'Venta'
-                  } &middot; {selectedVenta.forma_pago || 'Efectivo'}
+                  } &middot; {selectedVenta.forma_pago === 'mixto' ? 'Pago Mixto' : (selectedVenta.forma_pago || 'Efectivo')}
+                  {selectedVenta.user_name ? ` · Registrado por: ${selectedVenta.user_name}` : ''}
                 </p>
               </div>
               <button onClick={() => setSelectedVenta(null)} className="p-2 bg-white/5 hover:bg-white/10 rounded-xl transition-colors">
@@ -7410,10 +8481,51 @@ export default function BakeryDriverApp() {
                   {(selectedVenta.tipo === 'pago_proveedor' || selectedVenta.tipo === 'salida' || (typeof selectedVenta.tipo === 'string' && selectedVenta.tipo.startsWith('pago_'))) ? '-' : ''}${((selectedVenta.tipo === 'cobro_cuenta' || selectedVenta.tipo === 'pago_proveedor' || selectedVenta.tipo === 'salida') ? selectedVenta.pago : (selectedVenta.total || selectedVenta.pago)).toLocaleString('es-AR')}
                 </span>
               </div>
-              {selectedVenta.pago > 0 && selectedVenta.tipo !== 'cobro_cuenta' && selectedVenta.tipo !== 'pago_proveedor' && selectedVenta.tipo !== 'salida' && !selectedVenta.tipo?.startsWith('pago_') && (
+              {((Number(selectedVenta.pago || 0) + Number(selectedVenta.pago_saldo_a_favor || 0)) > 0) && selectedVenta.tipo !== 'cobro_cuenta' && selectedVenta.tipo !== 'pago_proveedor' && selectedVenta.tipo !== 'salida' && !selectedVenta.tipo?.startsWith('pago_') && (
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-400">Pagado</span>
-                  <span className="font-bold text-emerald-400">${selectedVenta.pago.toLocaleString('es-AR')}</span>
+                  <span className="font-bold text-emerald-400">${(Number(selectedVenta.pago || 0) + Number(selectedVenta.pago_saldo_a_favor || 0)).toLocaleString('es-AR')}</span>
+                </div>
+              )}
+              {selectedVenta.forma_pago === 'saldo_a_favor' && (
+                <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-3 my-2 flex justify-between items-center text-xs">
+                  <span className="font-bold text-emerald-300">⭐ Pagado con Saldo a Favor</span>
+                  <span className="font-bold text-emerald-400 font-mono">${Number(selectedVenta.pago_saldo_a_favor || selectedVenta.total).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
+                </div>
+              )}
+              {selectedVenta.forma_pago === 'mixto' && (
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-3 my-2 space-y-1.5 text-xs">
+                  <span className="text-[10px] uppercase font-bold text-amber-300 block mb-1 tracking-wider">🔀 Desglose de Pago:</span>
+                  {Number(selectedVenta.pago_efectivo) > 0 && (
+                    <div className="flex justify-between text-zinc-300">
+                      <span>💵 Efectivo</span>
+                      <span className="font-bold text-white font-mono">${Number(selectedVenta.pago_efectivo).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
+                  {Number(selectedVenta.pago_transferencia) > 0 && (
+                    <div className="flex justify-between text-zinc-300">
+                      <span>🏦 Transferencia / QR</span>
+                      <span className="font-bold text-white font-mono">${Number(selectedVenta.pago_transferencia).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
+                  {Number(selectedVenta.pago_tarjeta) > 0 && (
+                    <div className="flex justify-between text-zinc-300">
+                      <span>💳 Tarjeta</span>
+                      <span className="font-bold text-white font-mono">${Number(selectedVenta.pago_tarjeta).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
+                  {Number(selectedVenta.pago_cta_corriente) > 0 && (
+                    <div className="flex justify-between text-zinc-300">
+                      <span>📝 Cta. Corriente (Saldo)</span>
+                      <span className="font-bold text-amber-300 font-mono">${Number(selectedVenta.pago_cta_corriente).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
+                  {Number(selectedVenta.pago_saldo_a_favor) > 0 && (
+                    <div className="flex justify-between text-zinc-300">
+                      <span>⭐ Saldo a Favor</span>
+                      <span className="font-bold text-emerald-300 font-mono">${Number(selectedVenta.pago_saldo_a_favor).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
                 </div>
               )}
               {selectedVenta.saldo > 0 && (
@@ -7483,6 +8595,34 @@ export default function BakeryDriverApp() {
             <div className="p-6 space-y-6 max-h-[75vh] overflow-y-auto">
               {cajaTurnoModal === 'abrir' ? (
                 <div className="space-y-4">
+                  {isAdmin && (
+                    <div className="bg-white/5 p-5 rounded-2xl border border-white/10">
+                      <label className="text-xs text-zinc-400 uppercase tracking-widest font-bold mb-2 block">
+                        Cajero / Empleado Asignado al Turno
+                      </label>
+                      <select
+                        value={cajaAsignarUserId || user?.id}
+                        onChange={(e) => setCajaAsignarUserId(e.target.value)}
+                        className="w-full h-12 bg-black/50 border border-white/10 rounded-xl px-4 text-white text-sm outline-none focus:border-emerald-500"
+                      >
+                        <option value={user?.id}>{user?.name} (Yo - Admin)</option>
+                        {cajerosList.filter(u => u.id !== user?.id).map((u: any) => {
+                          const roleNames = Array.isArray(u.roles)
+                            ? u.roles.map((r: any) => typeof r === 'string' ? r : r.name).filter(Boolean).join(', ')
+                            : (typeof u.roles === 'string' ? u.roles : '');
+                          return (
+                            <option key={u.id} value={u.id}>
+                              {u.name} {roleNames ? `(${roleNames})` : ''}
+                            </option>
+                          );
+                        })}
+                      </select>
+                      <p className="text-xs text-zinc-500 mt-2">
+                        Si abrís la caja desde tu PC para la empleada del mostrador, seleccionala aquí para que el turno quede registrado a su nombre.
+                      </p>
+                    </div>
+                  )}
+
                   <div className="bg-white/5 p-5 rounded-2xl border border-white/10">
                     <label className="text-xs text-zinc-400 uppercase tracking-widest font-bold mb-2 block">
                       Monto de Apertura (Fondo / Cambio Inicial) <span className="text-red-400">*</span>
@@ -7505,101 +8645,308 @@ export default function BakeryDriverApp() {
                 </div>
               ) : (
                 <div className="space-y-6">
-                  {/* SECCIÓN ARQUEO (3 COLUMNAS: ESPERADO, REAL, DIFERENCIA) */}
-                  <div className="bg-gradient-to-br from-white/5 to-white/[0.02] p-6 rounded-2xl border-2 border-emerald-500/30 shadow-lg">
-                    <h3 className="text-sm font-bold text-emerald-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                      💰 Arqueo de Caja - Conteo de Efectivo
+                  {/* Resumen del turno en curso */}
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-red-500/20 text-red-400 flex items-center justify-center shrink-0">
+                        <Clock className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <p className="font-bold text-white text-sm">
+                          Turno #{cajaTurnoActivo?.id} · {cajaTurnoActivo?.user?.name || user?.name || "Cajero"}
+                        </p>
+                        <p className="text-zinc-400">
+                          Iniciado: {cajaTurnoActivo?.fecha_apertura ? new Date(cajaTurnoActivo.fecha_apertura).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : "Hoy"} hs
+                          {" · "}Fondo Apertura: <strong className="text-emerald-400 font-mono">${Number(cajaTurnoActivo?.monto_apertura || 0).toLocaleString('es-AR')}</strong>
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right sm:shrink-0 bg-black/40 px-3 py-1.5 rounded-xl border border-white/5">
+                      <span className="text-[10px] text-zinc-400 uppercase font-bold block">Total Facturado Mostrador</span>
+                      <span className="text-base font-black text-amber-400 font-mono">
+                        ${Number(cajaTurnoActivo?.ventas_panaderia_total || 0).toLocaleString('es-AR')}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* SECCIÓN 1: ARQUEO Y CONCILIACIÓN MULTI-MEDIO */}
+                  <div className="space-y-3">
+                    <h3 className="text-xs font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-2">
+                      <span>💰 Conciliación y Arqueo por Medio de Pago</span>
                     </h3>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      {/* 1. Efectivo Esperado */}
-                      <div className="bg-black/40 p-4 rounded-xl border border-blue-500/30 flex flex-col justify-between">
-                        <label className="text-xs text-blue-400 font-semibold uppercase tracking-wider block mb-1">
-                          Efectivo Esperado
-                        </label>
-                        <div className="text-2xl font-black text-blue-400">
-                          ${Number(cajaTurnoActivo?.efectivo_esperado || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </div>
-                        <p className="text-[10px] text-zinc-500 mt-2">
-                          Apertura + Ventas Mostrador + Ingresos - Salidas - Compras
-                        </p>
-                      </div>
 
-                      {/* 2. Efectivo Real (Editable) */}
-                      <div className="bg-black/40 p-4 rounded-xl border-2 border-emerald-500/50 flex flex-col justify-between">
-                        <label className="text-xs text-emerald-400 font-bold uppercase tracking-wider block mb-1">
-                          Efectivo Real (Contado) <span className="text-red-400">*</span>
-                        </label>
-                        <div className="relative">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-lg font-bold text-emerald-500">$</span>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={cajaEfectivoReal}
-                            onChange={(e) => setCajaEfectivoReal(e.target.value)}
-                            placeholder="0.00"
-                            className="w-full h-11 bg-black/60 border border-emerald-500/40 rounded-lg pl-8 pr-3 text-emerald-400 text-xl font-black outline-none focus:border-emerald-400"
-                          />
-                        </div>
-                        <p className="text-[10px] text-zinc-500 mt-2">
-                          Dinero físico contado en mano
-                        </p>
-                      </div>
-
-                      {/* 3. Diferencia */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {/* 1. EFECTIVO */}
                       {(() => {
-                        const real = parseFloat(String(cajaEfectivoReal)) || 0;
-                        const esp = parseFloat(String(cajaTurnoActivo?.efectivo_esperado)) || 0;
-                        const diff = real - esp;
-                        const isDiffZero = Math.abs(diff) < 0.01;
+                        const espEf = parseFloat(String(cajaTurnoActivo?.efectivo_esperado)) || 0;
+                        const realEf = cajaEfectivoReal !== "" ? (parseFloat(String(cajaEfectivoReal)) || 0) : 0;
+                        const diffEf = realEf - espEf;
+                        const isDiffZero = Math.abs(diffEf) < 0.01;
                         return (
-                          <div className={`p-4 rounded-xl border-2 flex flex-col justify-between ${isDiffZero ? 'bg-black/40 border-zinc-700 text-zinc-300' : diff > 0 ? 'bg-emerald-950/20 border-emerald-500/50 text-emerald-400' : 'bg-red-950/20 border-red-500/50 text-red-400'}`}>
-                            <label className="text-xs font-semibold uppercase tracking-wider block mb-1">
-                              Diferencia
-                            </label>
-                            <div className="text-2xl font-black">
-                              {diff > 0 ? '+' : ''}${diff.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          <div className="bg-gradient-to-br from-emerald-500/10 to-transparent p-4 rounded-2xl border-2 border-emerald-500/40 flex flex-col justify-between space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                                <Banknote className="w-4 h-4" /> Efectivo Físico *
+                              </span>
+                              <span className="text-[10px] font-mono text-zinc-400 bg-black/40 px-2 py-0.5 rounded-md">
+                                Esp: ${espEf.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                              </span>
                             </div>
-                            <p className="text-[10px] font-bold mt-2">
-                              {isDiffZero ? "✅ Arqueo Exacto" : diff > 0 ? "📈 Sobrante de Caja" : "📉 Faltante de Caja"}
-                            </p>
+
+                            <div>
+                              <label className="text-[11px] text-zinc-400 block mb-1">Total contado en mano:</label>
+                              <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-lg font-bold text-emerald-500">$</span>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={cajaEfectivoReal}
+                                  onChange={(e) => setCajaEfectivoReal(e.target.value)}
+                                  placeholder="0.00"
+                                  className="w-full h-11 bg-black/60 border border-emerald-500/40 rounded-xl pl-8 pr-3 text-emerald-400 text-lg font-black outline-none focus:border-emerald-400 font-mono"
+                                />
+                              </div>
+                            </div>
+
+                            <div className={`p-2 rounded-xl text-xs font-mono font-bold flex items-center justify-between ${
+                              isDiffZero ? 'bg-emerald-500/10 text-emerald-300' :
+                              diffEf > 0 ? 'bg-blue-500/10 text-blue-300' : 'bg-red-500/10 text-red-300'
+                            }`}>
+                              <span className="text-[10px] uppercase">Diferencia:</span>
+                              <span>{diffEf > 0 ? '+' : ''}${diffEf.toLocaleString('es-AR', { minimumFractionDigits: 2 })} {isDiffZero ? "✅ Exacto" : diffEf > 0 ? "📈 Sobrante" : "📉 Faltante"}</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* 2. TRANSFERENCIAS */}
+                      {(() => {
+                        const espTr = parseFloat(String(cajaTurnoActivo?.ventas_panaderia_transferencia)) || 0;
+                        const realTr = cajaTransferenciaReal !== "" ? (parseFloat(String(cajaTransferenciaReal)) || 0) : espTr;
+                        const diffTr = realTr - espTr;
+                        const isDiffZero = Math.abs(diffTr) < 0.01;
+                        return (
+                          <div className="bg-gradient-to-br from-blue-500/10 to-transparent p-4 rounded-2xl border-2 border-blue-500/40 flex flex-col justify-between space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+                                <CreditCard className="w-4 h-4" /> Transferencias
+                              </span>
+                              <span className="text-[10px] font-mono text-zinc-400 bg-black/40 px-2 py-0.5 rounded-md">
+                                Esp: ${espTr.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                              </span>
+                            </div>
+
+                            <div>
+                              <label className="text-[11px] text-zinc-400 block mb-1">Total verificado en Homebanking:</label>
+                              <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-lg font-bold text-blue-500">$</span>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={cajaTransferenciaReal}
+                                  onChange={(e) => setCajaTransferenciaReal(e.target.value)}
+                                  placeholder={String(espTr)}
+                                  className="w-full h-11 bg-black/60 border border-blue-500/40 rounded-xl pl-8 pr-3 text-blue-400 text-lg font-black outline-none focus:border-blue-400 font-mono"
+                                />
+                              </div>
+                            </div>
+
+                            <div className={`p-2 rounded-xl text-xs font-mono font-bold flex items-center justify-between ${
+                              isDiffZero ? 'bg-blue-500/10 text-blue-300' :
+                              diffTr > 0 ? 'bg-emerald-500/10 text-emerald-300' : 'bg-red-500/10 text-red-300'
+                            }`}>
+                              <span className="text-[10px] uppercase">Diferencia:</span>
+                              <span>{diffTr > 0 ? '+' : ''}${diffTr.toLocaleString('es-AR', { minimumFractionDigits: 2 })} {isDiffZero ? "✅ Coincide" : diffTr > 0 ? "📈 Sobrante" : "📉 Faltante"}</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* 3. TARJETAS / POSNET */}
+                      {(() => {
+                        const espTj = parseFloat(String(cajaTurnoActivo?.ventas_panaderia_tarjeta)) || 0;
+                        const realTj = cajaTarjetaReal !== "" ? (parseFloat(String(cajaTarjetaReal)) || 0) : espTj;
+                        const diffTj = realTj - espTj;
+                        const isDiffZero = Math.abs(diffTj) < 0.01;
+                        return (
+                          <div className="bg-gradient-to-br from-purple-500/10 to-transparent p-4 rounded-2xl border-2 border-purple-500/40 flex flex-col justify-between space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-purple-400 uppercase tracking-wider flex items-center gap-1.5">
+                                <Receipt className="w-4 h-4" /> Tarjetas / Posnet
+                              </span>
+                              <span className="text-[10px] font-mono text-zinc-400 bg-black/40 px-2 py-0.5 rounded-md">
+                                Esp: ${espTj.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                              </span>
+                            </div>
+
+                            <div>
+                              <label className="text-[11px] text-zinc-400 block mb-1">Total según cierre de lote:</label>
+                              <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-lg font-bold text-purple-500">$</span>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={cajaTarjetaReal}
+                                  onChange={(e) => setCajaTarjetaReal(e.target.value)}
+                                  placeholder={String(espTj)}
+                                  className="w-full h-11 bg-black/60 border border-purple-500/40 rounded-xl pl-8 pr-3 text-purple-400 text-lg font-black outline-none focus:border-purple-400 font-mono"
+                                />
+                              </div>
+                            </div>
+
+                            <div className={`p-2 rounded-xl text-xs font-mono font-bold flex items-center justify-between ${
+                              isDiffZero ? 'bg-purple-500/10 text-purple-300' :
+                              diffTj > 0 ? 'bg-emerald-500/10 text-emerald-300' : 'bg-red-500/10 text-red-300'
+                            }`}>
+                              <span className="text-[10px] uppercase">Diferencia:</span>
+                              <span>{diffTj > 0 ? '+' : ''}${diffTj.toLocaleString('es-AR', { minimumFractionDigits: 2 })} {isDiffZero ? "✅ Coincide" : diffTj > 0 ? "📈 Sobrante" : "📉 Faltante"}</span>
+                            </div>
                           </div>
                         );
                       })()}
                     </div>
                   </div>
 
+                  {/* SECCIÓN 2: DESTINO DE FONDOS Y RETIRO A TESORERÍA ("LO QUE SACO") */}
+                  <div className="bg-gradient-to-br from-amber-500/10 via-amber-500/[0.05] to-transparent p-5 rounded-3xl border-2 border-amber-500/40 shadow-xl space-y-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h4 className="text-sm font-black text-amber-300 uppercase tracking-wider flex items-center gap-2">
+                          <Building2 className="w-5 h-5 text-amber-400" />
+                          Destino de Fondos · Retiro a Tesorería / Bóveda
+                        </h4>
+                        <p className="text-xs text-zinc-400 mt-1">
+                          Cargá aquí lo que retirás físicamente del mostrador hacia Tesorería. El resto quedará como fondo en el cajón para el próximo turno.
+                        </p>
+                      </div>
+                    </div>
+
+                    {(() => {
+                      const efReal = cajaEfectivoReal !== "" ? (parseFloat(String(cajaEfectivoReal)) || 0) : (parseFloat(String(cajaTurnoActivo?.efectivo_esperado)) || 0);
+                      const retiro = cajaMontoRetiro !== "" ? (parseFloat(String(cajaMontoRetiro)) || 0) : efReal;
+                      const fondoQueda = Math.max(0, efReal - retiro);
+                      const fondoApertura = parseFloat(String(cajaTurnoActivo?.monto_apertura)) || 0;
+
+                      return (
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            {/* Input: Monto que saco a Tesorería */}
+                            <div className="bg-black/50 p-4 rounded-2xl border border-amber-500/30 flex flex-col justify-between">
+                              <div>
+                                <label className="text-xs font-bold text-amber-300 uppercase tracking-wider block mb-1">
+                                  💵 Monto que saco a Tesorería / Bóveda *
+                                </label>
+                                <p className="text-[11px] text-zinc-400 mb-2">Dinero que retirás de la caja física</p>
+                                <div className="relative">
+                                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xl font-bold text-amber-400">$</span>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={cajaMontoRetiro}
+                                    onChange={(e) => setCajaMontoRetiro(e.target.value)}
+                                    placeholder={String(efReal)}
+                                    className="w-full h-12 bg-black/70 border border-amber-500/50 rounded-xl pl-8 pr-3 text-amber-300 text-xl font-black outline-none focus:border-amber-400 font-mono"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Botones de cálculo rápido */}
+                              <div className="flex gap-1.5 pt-3 flex-wrap">
+                                <button
+                                  type="button"
+                                  onClick={() => setCajaMontoRetiro(efReal)}
+                                  className="text-[10px] font-bold px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 rounded-lg border border-amber-500/30 transition-all active:scale-95"
+                                >
+                                  Retirar Todo (${efReal.toLocaleString('es-AR')})
+                                </button>
+                                {fondoApertura > 0 && efReal > fondoApertura && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setCajaMontoRetiro(Math.max(0, efReal - fondoApertura))}
+                                    className="text-[10px] font-bold px-2.5 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 rounded-lg border border-emerald-500/30 transition-all active:scale-95"
+                                  >
+                                    Dejar Fondo Base (${fondoApertura.toLocaleString('es-AR')})
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => setCajaMontoRetiro(0)}
+                                  className="text-[10px] font-bold px-2.5 py-1 bg-white/10 hover:bg-white/15 text-zinc-300 rounded-lg border border-white/10 transition-all active:scale-95"
+                                >
+                                  Dejar Todo ($0)
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Card: Fondo remanente que queda en cajón */}
+                            <div className="bg-black/50 p-4 rounded-2xl border border-emerald-500/30 flex flex-col justify-between">
+                              <div>
+                                <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider block mb-1">
+                                  🪙 Fondo que queda en el cajón físico
+                                </span>
+                                <p className="text-[11px] text-zinc-400 mb-2">Para el próximo turno / cajero</p>
+                                <div className="text-2xl sm:text-3xl font-black text-emerald-400 font-mono py-1">
+                                  ${fondoQueda.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </div>
+                              </div>
+                              <p className="text-[11px] text-zinc-400 border-t border-white/5 pt-2">
+                                Este monto permanece en el mostrador para dar cambio en la siguiente apertura.
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Checkbox: Acreditar transferencias bancarias a Tesorería */}
+                          <label className="flex items-center gap-3 p-3 bg-black/40 rounded-xl border border-white/5 cursor-pointer hover:bg-black/60 transition-colors">
+                            <input
+                              type="checkbox"
+                              checked={cajaAcreditarTransf}
+                              onChange={(e) => setCajaAcreditarTransf(e.target.checked)}
+                              className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 bg-zinc-900 border-zinc-700"
+                            />
+                            <div className="text-xs">
+                              <span className="font-bold text-zinc-200">
+                                Acreditar transferencias verified (${Number(cajaTransferenciaReal !== "" ? cajaTransferenciaReal : cajaTurnoActivo?.ventas_panaderia_transferencia || 0).toLocaleString('es-AR')}) a Tesorería Bancaria
+                              </span>
+                              <p className="text-[11px] text-zinc-500">Suma automáticamente al saldo en bancos de Tesorería al cerrar la caja.</p>
+                            </div>
+                          </label>
+                        </div>
+                      );
+                    })()}
+                  </div>
+
                   {/* DESGLOSE DETALLADO DEL MOSTRADOR */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     {/* Ventas Panadería */}
-                    <div className="bg-black/30 p-4 rounded-2xl border border-white/10">
-                      <div className="flex justify-between items-center mb-3">
+                    <div className="bg-black/30 p-3.5 rounded-2xl border border-white/10">
+                      <div className="flex justify-between items-center mb-2.5">
                         <span className="text-xs font-bold text-yellow-400 uppercase tracking-wider flex items-center gap-1.5">
-                          🥖 Ventas Mostrador (Vendedor)
+                          🥖 Ventas Mostrador
                         </span>
-                        <span className="text-xs font-bold bg-yellow-500/20 text-yellow-300 px-2.5 py-0.5 rounded-full">
+                        <span className="text-xs font-bold bg-yellow-500/20 text-yellow-300 px-2 py-0.5 rounded-full font-mono">
                           ${Number(cajaTurnoActivo?.ventas_panaderia_total || 0).toLocaleString('es-AR')}
                         </span>
                       </div>
                       <div className="space-y-1.5 text-xs">
                         <div className="flex justify-between text-zinc-400">
                           <span className="font-semibold text-yellow-300">Efectivo en Caja:</span>
-                          <span className="font-bold text-yellow-400 text-sm">${Number(cajaTurnoActivo?.ventas_panaderia_efectivo || 0).toLocaleString('es-AR')}</span>
+                          <span className="font-bold text-yellow-400 font-mono">${Number(cajaTurnoActivo?.ventas_panaderia_efectivo || 0).toLocaleString('es-AR')}</span>
                         </div>
                         <div className="flex justify-between text-zinc-400">
-                          <span>Transferencia:</span>
-                          <span className="font-semibold text-zinc-200">${Number(cajaTurnoActivo?.ventas_panaderia_transferencia || 0).toLocaleString('es-AR')}</span>
+                          <span>Transferencias:</span>
+                          <span className="font-semibold text-blue-300 font-mono">${Number(cajaTurnoActivo?.ventas_panaderia_transferencia || 0).toLocaleString('es-AR')}</span>
                         </div>
                         <div className="flex justify-between text-zinc-400">
-                          <span>Tarjeta:</span>
-                          <span className="font-semibold text-zinc-200">${Number(cajaTurnoActivo?.ventas_panaderia_tarjeta || 0).toLocaleString('es-AR')}</span>
+                          <span>Tarjetas:</span>
+                          <span className="font-semibold text-purple-300 font-mono">${Number(cajaTurnoActivo?.ventas_panaderia_tarjeta || 0).toLocaleString('es-AR')}</span>
                         </div>
                       </div>
                     </div>
 
                     {/* Movimientos de Caja */}
-                    <div className="bg-black/30 p-4 rounded-2xl border border-white/10">
-                      <div className="flex justify-between items-center mb-3">
+                    <div className="bg-black/30 p-3.5 rounded-2xl border border-white/10">
+                      <div className="flex justify-between items-center mb-2.5">
                         <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
                           📥 Movimientos de Caja
                         </span>
@@ -7607,22 +8954,22 @@ export default function BakeryDriverApp() {
                       <div className="space-y-1.5 text-xs">
                         <div className="flex justify-between text-zinc-400">
                           <span>Fondo Apertura:</span>
-                          <span className="font-semibold text-zinc-200">${Number(cajaTurnoActivo?.monto_apertura || 0).toLocaleString('es-AR')}</span>
+                          <span className="font-semibold text-zinc-200 font-mono">${Number(cajaTurnoActivo?.monto_apertura || 0).toLocaleString('es-AR')}</span>
                         </div>
                         <div className="flex justify-between text-zinc-400">
-                          <span>Cobros Deuda (Ingresos):</span>
-                          <span className="font-semibold text-emerald-400">+ ${Number(cajaTurnoActivo?.ingresos || 0).toLocaleString('es-AR')}</span>
+                          <span>Cobros Deuda (CC):</span>
+                          <span className="font-semibold text-emerald-400 font-mono">+ ${Number(cajaTurnoActivo?.ingresos || 0).toLocaleString('es-AR')}</span>
                         </div>
                         <div className="flex justify-between text-zinc-400">
                           <span>Salidas de Caja:</span>
-                          <span className="font-semibold text-red-400">- ${Number(cajaTurnoActivo?.salidas || 0).toLocaleString('es-AR')}</span>
+                          <span className="font-semibold text-red-400 font-mono">- ${Number(cajaTurnoActivo?.salidas || 0).toLocaleString('es-AR')}</span>
                         </div>
                       </div>
                     </div>
 
                     {/* Compras y Gastos en Efectivo */}
-                    <div className="bg-black/30 p-4 rounded-2xl border border-white/10">
-                      <div className="flex justify-between items-center mb-3">
+                    <div className="bg-black/30 p-3.5 rounded-2xl border border-white/10">
+                      <div className="flex justify-between items-center mb-2.5">
                         <span className="text-xs font-bold text-red-400 uppercase tracking-wider">
                           🛒 Gastos Pagados de Caja
                         </span>
@@ -7630,11 +8977,11 @@ export default function BakeryDriverApp() {
                       <div className="space-y-1.5 text-xs">
                         <div className="flex justify-between text-zinc-400">
                           <span>Compras en Efectivo:</span>
-                          <span className="font-semibold text-red-400">- ${Number(cajaTurnoActivo?.compras_efectivo || 0).toLocaleString('es-AR')}</span>
+                          <span className="font-semibold text-red-400 font-mono">- ${Number(cajaTurnoActivo?.compras_efectivo || 0).toLocaleString('es-AR')}</span>
                         </div>
                         <div className="flex justify-between text-zinc-400">
                           <span>Total Compras del Día:</span>
-                          <span className="font-semibold text-zinc-200">${Number(cajaTurnoActivo?.monto_total_compras || 0).toLocaleString('es-AR')}</span>
+                          <span className="font-semibold text-zinc-200 font-mono">${Number(cajaTurnoActivo?.monto_total_compras || 0).toLocaleString('es-AR')}</span>
                         </div>
                       </div>
                     </div>
@@ -7648,7 +8995,7 @@ export default function BakeryDriverApp() {
                     <textarea
                       value={cajaObservaciones}
                       onChange={(e) => setCajaObservaciones(e.target.value)}
-                      placeholder="Ej: Faltante de $50 por cambio dado incorrectamente, o retiros de socios..."
+                      placeholder="Ej: Faltante de $50 por cambio dado incorrectamente, o notas para el próximo cajero..."
                       rows={2}
                       className="w-full bg-black/50 border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-red-500 resize-none transition-colors"
                     />
@@ -7797,6 +9144,163 @@ export default function BakeryDriverApp() {
                 Cerrar Detalle
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+
+
+      {/* Modal: Movimiento Manual de Tesorería */}
+      {tesoreriaModal === 'movimiento' && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
+          onClick={() => setTesoreriaModal(null)}>
+          <div className="relative w-full max-w-md rounded-3xl border border-white/10 bg-zinc-950 p-6 shadow-2xl space-y-4"
+            onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between border-b border-white/10 pb-4">
+              <div>
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Building2 className="w-5 h-5 text-amber-400" /> Movimiento de Tesorería
+                </h3>
+                <p className="text-xs text-zinc-400 mt-1">
+                  Registra ingresos o egresos de fondos centrales.
+                </p>
+              </div>
+              <button onClick={() => setTesoreriaModal(null)} className="p-2 bg-white/5 hover:bg-white/10 rounded-xl transition-colors">
+                <X className="w-4 h-4 text-zinc-400" />
+              </button>
+            </div>
+
+            <form onSubmit={handleGuardarMovimientoTesoreria} className="space-y-4">
+              {/* Tipo */}
+              <div className="grid grid-cols-2 gap-2 bg-black/40 p-1 rounded-2xl border border-white/5">
+                <button
+                  type="button"
+                  onClick={() => setTesoreriaForm(p => ({ ...p, tipo: 'ingreso' }))}
+                  className={`py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                    tesoreriaForm.tipo === 'ingreso' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  <Plus className="w-3.5 h-3.5" /> Ingreso (+)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTesoreriaForm(p => ({ ...p, tipo: 'egreso' }))}
+                  className={`py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                    tesoreriaForm.tipo === 'egreso' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  <Minus className="w-3.5 h-3.5" /> Egreso (-)
+                </button>
+              </div>
+
+              {/* Medio de Pago */}
+              <div>
+                <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider block mb-1.5">
+                  Destino / Origen del Fondo
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setTesoreriaForm(p => ({ ...p, metodo_pago: 'efectivo' }))}
+                    className={`py-2.5 px-3 rounded-2xl text-xs font-bold border transition-all flex items-center justify-center gap-2 ${
+                      tesoreriaForm.metodo_pago === 'efectivo'
+                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                        : 'border-white/5 bg-white/5 text-zinc-400 hover:bg-white/10'
+                    }`}
+                  >
+                    <Banknote className="w-4 h-4" /> Efectivo (Bóveda)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTesoreriaForm(p => ({ ...p, metodo_pago: 'transferencia' }))}
+                    className={`py-2.5 px-3 rounded-2xl text-xs font-bold border transition-all flex items-center justify-center gap-2 ${
+                      tesoreriaForm.metodo_pago === 'transferencia'
+                        ? 'border-blue-500/40 bg-blue-500/10 text-blue-300'
+                        : 'border-white/5 bg-white/5 text-zinc-400 hover:bg-white/10'
+                    }`}
+                  >
+                    <CreditCard className="w-4 h-4" /> Banco / Transf.
+                  </button>
+                </div>
+              </div>
+
+              {/* Monto */}
+              <div>
+                <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider block mb-1.5">
+                  Monto ($) *
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  min="0.01"
+                  required
+                  placeholder="0.00"
+                  value={tesoreriaForm.monto}
+                  onChange={e => setTesoreriaForm(p => ({ ...p, monto: e.target.value }))}
+                  className="w-full h-12 bg-black/40 border border-white/10 rounded-2xl px-4 text-xl font-bold font-mono text-white outline-none focus:border-amber-400"
+                />
+              </div>
+
+              {/* Concepto */}
+              <div>
+                <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider block mb-1.5">
+                  Concepto *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej: Aporte de capital, Retiro de socios, Pago extraordinario"
+                  value={tesoreriaForm.concepto}
+                  onChange={e => setTesoreriaForm(p => ({ ...p, concepto: e.target.value }))}
+                  className="w-full h-11 bg-black/40 border border-white/10 rounded-2xl px-4 text-sm text-white outline-none focus:border-amber-400"
+                />
+              </div>
+
+              {/* Fecha y Hora */}
+              <div>
+                <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider block mb-1.5">
+                  Fecha y Hora
+                </label>
+                <input
+                  type="datetime-local"
+                  value={tesoreriaForm.fecha ? tesoreriaForm.fecha.slice(0, 16) : ""}
+                  onChange={e => setTesoreriaForm(p => ({ ...p, fecha: e.target.value }))}
+                  className="w-full h-11 bg-black/40 border border-white/10 rounded-2xl px-4 text-sm text-white outline-none focus:border-amber-400 [&::-webkit-calendar-picker-indicator]:invert"
+                />
+              </div>
+
+              {/* Observaciones */}
+              <div>
+                <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider block mb-1.5">
+                  Observaciones (Opcional)
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Detalles adicionales, número de comprobante, etc..."
+                  value={tesoreriaForm.observaciones}
+                  onChange={e => setTesoreriaForm(p => ({ ...p, observaciones: e.target.value }))}
+                  className="w-full bg-black/40 border border-white/10 rounded-2xl p-3 text-xs text-white outline-none focus:border-amber-400 resize-none"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setTesoreriaModal(null)}
+                  className="flex-1 py-3 bg-white/5 hover:bg-white/10 rounded-xl text-xs font-bold text-zinc-300 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingTesoreria || !tesoreriaForm.monto || !tesoreriaForm.concepto}
+                  className="flex-1 py-3 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-black font-black rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5"
+                >
+                  {savingTesoreria ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  Guardar Movimiento
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

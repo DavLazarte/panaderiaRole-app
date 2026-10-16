@@ -1,5 +1,6 @@
 "use client";
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Search, Plus, X, Building2, Phone, MapPin, Mail, UserCheck, AlertCircle, RefreshCw } from 'lucide-react';
 
 interface ProveedorSelectorProps {
@@ -10,6 +11,7 @@ interface ProveedorSelectorProps {
 }
 
 export default function ProveedorSelector({ token, onSelect, selectedProveedor, onClear }: ProveedorSelectorProps) {
+  const [mounted, setMounted] = useState(false);
   const [proveedores, setProveedores] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
@@ -56,6 +58,10 @@ export default function ProveedorSelector({ token, onSelect, selectedProveedor, 
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     fetchProveedores();
@@ -283,8 +289,8 @@ export default function ProveedorSelector({ token, onSelect, selectedProveedor, 
       )}
 
       {/* Modal Nuevo Proveedor (exact styling as native app modals) */}
-      {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+      {modalOpen && mounted && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
           <div className="w-full max-w-md bg-zinc-900 border border-white/10 rounded-3xl p-6 space-y-4 shadow-2xl">
             <div className="flex justify-between items-center">
               <h2 className="font-bold text-lg text-white">Registrar Nuevo Proveedor</h2>
@@ -369,7 +375,8 @@ export default function ProveedorSelector({ token, onSelect, selectedProveedor, 
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

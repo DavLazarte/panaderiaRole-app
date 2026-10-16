@@ -1,6 +1,7 @@
 "use client";
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, Plus, Boxes, ShoppingBag, Check, RefreshCw, X } from 'lucide-react';
+import AltaRapidaModal from './AltaRapidaModal';
 
 interface MateriaPrimaSelectorProps {
   token: string;
@@ -15,9 +16,15 @@ export default function MateriaPrimaSelector({ token, onAdd }: MateriaPrimaSelec
   const [isOpen, setIsOpen] = useState(false);
   const [recentlyAddedId, setRecentlyAddedId] = useState<string | null>(null);
 
+  // Estado para el modal de alta rápida
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalInitialName, setModalInitialName] = useState('');
+  const [modalInitialTipo, setModalInitialTipo] = useState<'materia_prima' | 'articulo'>('materia_prima');
+
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const justSelectedRef = useRef(false);
 
   const fetchItems = async (q = '', t = tipo) => {
     setLoading(true);
@@ -39,7 +46,14 @@ export default function MateriaPrimaSelector({ token, onAdd }: MateriaPrimaSelec
     }
   };
 
-  useEffect(() => { fetchItems(); }, [token]);
+  useEffect(() => { 
+    fetchItems(); 
+    const handleCompraRegistrada = () => {
+      fetchItems('', tipo);
+    };
+    window.addEventListener('compra-registrada', handleCompraRegistrada);
+    return () => window.removeEventListener('compra-registrada', handleCompraRegistrada);
+  }, [token, tipo]);
 
   useEffect(() => {
     function handleOutside(e: MouseEvent) {
@@ -69,18 +83,42 @@ export default function MateriaPrimaSelector({ token, onAdd }: MateriaPrimaSelec
     setRecentlyAddedId(key);
     setSearch('');
     setIsOpen(false);
+    justSelectedRef.current = true;
     setTimeout(() => setRecentlyAddedId(null), 1200);
+    // Enfocar y seleccionar el input para búsqueda inmediata sin reabrir el menú
     inputRef.current?.focus();
+    inputRef.current?.select();
+  };
+
+  const handleItemCreated = (item: any) => {
+    handleSelect(item);
+    fetchItems('', tipo);
   };
 
   return (
     <div className="relative w-full" ref={containerRef}>
       {/* ── CAJA DEL BUSCADOR ── */}
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4 flex flex-col gap-3">
-        {/* Label */}
-        <div className="flex items-center gap-2">
-          <Search className="w-4 h-4 text-brand-yellow shrink-0" />
-          <span className="text-sm font-bold text-white">Agregar producto a la factura</span>
+        {/* Label y Botón Crear Rápido */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Search className="w-4 h-4 text-brand-yellow shrink-0" />
+            <span className="text-sm font-bold text-white">Agregar producto a la factura</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setModalInitialName(search);
+              setModalInitialTipo(tipo === 'articulo' ? 'articulo' : 'materia_prima');
+              setModalOpen(true);
+              setIsOpen(false);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-brand-red/15 text-brand-yellow border border-brand-red/30 text-xs font-semibold hover:bg-brand-red/25 transition-all cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>+ Nuevo Producto</span>
+          </button>
         </div>
 
         {/* Input + filtro de tipo integrado */}
@@ -103,7 +141,14 @@ export default function MateriaPrimaSelector({ token, onAdd }: MateriaPrimaSelec
               ref={inputRef}
               type="text"
               value={search}
-              onFocus={() => { setIsOpen(true); if (!results.length) fetchItems(search, tipo); }}
+              onFocus={() => {
+                if (justSelectedRef.current) {
+                  justSelectedRef.current = false;
+                  return;
+                }
+                setIsOpen(true);
+                if (!results.length) fetchItems(search, tipo);
+              }}
               onChange={e => handleChange(e.target.value)}
               placeholder="Buscar por nombre… (Harina 000, Levadura, Yerba…)"
               className="w-full bg-transparent text-white text-sm placeholder:text-zinc-500 outline-none"
@@ -131,59 +176,119 @@ export default function MateriaPrimaSelector({ token, onAdd }: MateriaPrimaSelec
               <RefreshCw className="w-4 h-4 animate-spin text-brand-red" /> Buscando…
             </div>
           ) : results.length === 0 ? (
-            <div className="p-5 text-center text-zinc-500 text-sm">
-              No se encontraron productos.
+            <div className="p-5 text-center space-y-3">
+              <p className="text-sm text-zinc-400">
+                No se encontraron productos coincidentes{search ? ` para "${search}"` : ''}.
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setModalInitialName(search);
+                    setModalInitialTipo('materia_prima');
+                    setModalOpen(true);
+                    setIsOpen(false);
+                  }}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500/15 text-amber-300 border border-amber-500/30 text-xs font-bold hover:bg-amber-500/25 transition-all cursor-pointer"
+                >
+                  <Boxes className="w-4 h-4 text-amber-400" />
+                  <span>Crear {search ? `"${search}"` : 'Nuevo'} como Materia Prima</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setModalInitialName(search);
+                    setModalInitialTipo('articulo');
+                    setModalOpen(true);
+                    setIsOpen(false);
+                  }}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-xs font-bold hover:bg-emerald-500/25 transition-all cursor-pointer"
+                >
+                  <ShoppingBag className="w-4 h-4 text-emerald-400" />
+                  <span>Crear {search ? `"${search}"` : 'Nuevo'} como Artículo</span>
+                </button>
+              </div>
             </div>
           ) : (
-            <ul className="max-h-72 overflow-y-auto divide-y divide-white/5">
-              {results.map(item => {
-                const isMp = item.tipo === 'materia_prima';
-                const key = `${item.tipo}-${item.id}`;
-                const added = recentlyAddedId === key;
+            <>
+              <ul className="max-h-72 overflow-y-auto divide-y divide-white/5">
+                {results.map(item => {
+                  const isMp = item.tipo === 'materia_prima';
+                  const key = `${item.tipo}-${item.id}`;
+                  const added = recentlyAddedId === key;
 
-                return (
-                  <li
-                    key={key}
-                    onClick={() => handleSelect(item)}
-                    className={`flex items-center justify-between px-4 py-3 cursor-pointer transition-colors group ${
-                      added ? 'bg-emerald-500/10' : 'hover:bg-white/5'
-                    }`}
-                  >
-                    {/* Icono + info */}
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                        isMp ? 'bg-amber-500/10 text-amber-400' : 'bg-emerald-500/10 text-emerald-400'
+                  return (
+                    <li
+                      key={key}
+                      onClick={() => handleSelect(item)}
+                      className={`flex items-center justify-between px-4 py-3 cursor-pointer transition-colors group ${
+                        added ? 'bg-emerald-500/10' : 'hover:bg-white/5'
+                      }`}
+                    >
+                      {/* Icono + info */}
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                          isMp ? 'bg-amber-500/10 text-amber-400' : 'bg-emerald-500/10 text-emerald-400'
+                        }`}>
+                          {isMp ? <Boxes className="w-4 h-4" /> : <ShoppingBag className="w-4 h-4" />}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-white truncate group-hover:text-brand-yellow transition-colors">
+                            {item.nombre}
+                          </p>
+                          <p className="text-[11px] text-zinc-500 truncate">
+                            {isMp
+                              ? `${item.peso_unidad} ${item.unidad_medida || 'kg'}/bulto · Stock: ${item.stock_deposito} ${item.unidad_medida || 'kg'}${item.precio_compra > 0 ? ` · Último costo: $${Number(item.precio_compra).toLocaleString('es-AR')}` : ''}`
+                              : `Stock: ${item.stock_deposito} u.${item.precio_venta > 0 ? ` · Precio venta: $${Number(item.precio_venta).toLocaleString('es-AR')}` : ''}`
+                            }
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Botón agregar */}
+                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-all ${
+                        added
+                          ? 'bg-emerald-500 text-white'
+                          : 'bg-white/5 text-zinc-400 group-hover:bg-brand-red group-hover:text-white'
                       }`}>
-                        {isMp ? <Boxes className="w-4 h-4" /> : <ShoppingBag className="w-4 h-4" />}
+                        {added ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
                       </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-white truncate group-hover:text-brand-yellow transition-colors">
-                          {item.nombre}
-                        </p>
-                        <p className="text-[11px] text-zinc-500 truncate">
-                          {isMp
-                            ? `${item.peso_unidad} ${item.unidad_medida || 'kg'}/bulto · Stock: ${item.stock_deposito} ${item.unidad_medida || 'kg'}${item.precio_compra > 0 ? ` · Último costo: $${Number(item.precio_compra).toLocaleString('es-AR')}` : ''}`
-                            : `Stock: ${item.stock_deposito} u.${item.precio_venta > 0 ? ` · Precio venta: $${Number(item.precio_venta).toLocaleString('es-AR')}` : ''}`
-                          }
-                        </p>
-                      </div>
-                    </div>
+                    </li>
+                  );
+                })}
+              </ul>
 
-                    {/* Botón agregar */}
-                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-all ${
-                      added
-                        ? 'bg-emerald-500 text-white'
-                        : 'bg-white/5 text-zinc-400 group-hover:bg-brand-red group-hover:text-white'
-                    }`}>
-                      {added ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+              {/* Barra inferior para crear nuevo producto */}
+              <div className="p-2.5 bg-black/40 border-t border-white/5 flex items-center justify-between">
+                <span className="text-[11px] text-zinc-400">¿No encuentras lo que buscas?</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setModalInitialName(search);
+                    setModalInitialTipo(tipo === 'articulo' ? 'articulo' : 'materia_prima');
+                    setModalOpen(true);
+                    setIsOpen(false);
+                  }}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold text-brand-yellow hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Crear nuevo {search ? `"${search}"` : 'producto'}</span>
+                </button>
+              </div>
+            </>
           )}
         </div>
       )}
+
+      {/* Modal Alta Rápida */}
+      <AltaRapidaModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        token={token}
+        initialName={modalInitialName}
+        initialTipo={modalInitialTipo}
+        onItemCreated={handleItemCreated}
+      />
     </div>
   );
 }

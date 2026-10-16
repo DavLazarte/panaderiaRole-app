@@ -19,6 +19,7 @@ export default function ComprasApp({ token, onClose }: { token: string, onClose?
   const [tipoPago, setTipoPago] = useState<string>('efectivo');
   const [numRecibo, setNumRecibo] = useState<string>('');
   const [impactaCaja, setImpactaCaja] = useState<boolean>(true);
+  const [origenDinero, setOrigenDinero] = useState<string>('tesoreria_efectivo');
   
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -92,7 +93,7 @@ export default function ComprasApp({ token, onClose }: { token: string, onClose?
         nombre: nombreItem,
         codigo: item.codigo,
         cantidad: '1',
-        precio_compra: '',
+        precio_compra: item.precio_compra ? String(item.precio_compra) : '',
         precio_venta: item.precio_venta ? String(item.precio_venta) : '',
       }]);
     } else {
@@ -188,6 +189,7 @@ export default function ComprasApp({ token, onClose }: { token: string, onClose?
           pago: parseFloat(String(pago).replace(',', '.')) || 0,
           tipo_pago: tipoPago,
           impacta_caja: impactaCaja,
+          origen_dinero: impactaCaja ? 'caja_mostrador' : origenDinero,
           articulos: payloadArticulos
         })
       });
@@ -336,6 +338,8 @@ export default function ComprasApp({ token, onClose }: { token: string, onClose?
                 setNumRecibo={setNumRecibo}
                 impactaCaja={impactaCaja}
                 setImpactaCaja={setImpactaCaja}
+                origenDinero={origenDinero}
+                setOrigenDinero={setOrigenDinero}
               />
 
               {/* PASO 5: BOTÓN PRINCIPAL DE CONFIRMACIÓN */}
