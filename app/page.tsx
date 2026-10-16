@@ -2971,7 +2971,7 @@ export default function BakeryDriverApp() {
 
   // Checkout state
   const [checkoutOpen, setCheckoutOpen] = useState(false);
-  const [pedidoCheckout, setPedidoCheckout] = useState<{ id: number; items: SaleItem[]; cliente: { id: number; name: string } | null } | null>(null);
+  const [pedidoCheckout, setPedidoCheckout] = useState<{ id?: number | null; items: SaleItem[]; cliente: { id: number; name: string } | null } | null>(null);
 
   // Cliente detalle
   const [clienteDetalle, setClienteDetalle] = useState<Client | null>(null);
@@ -3413,7 +3413,7 @@ export default function BakeryDriverApp() {
       }));
 
       const customerName = pedido?.customer || delivery.customer || "Consumidor Final";
-      const idCliente = pedido?.idcliente ?? delivery.idcliente;
+      const idCliente = Number(pedido?.idcliente ?? delivery.idcliente) || 0;
       const clienteData = customerName !== "Consumidor Final"
         ? { id: idCliente, name: customerName }
         : null;
@@ -3463,7 +3463,7 @@ export default function BakeryDriverApp() {
       setCart(cartMap);
 
       const customerName = pedido?.customer || delivery.customer || "Consumidor Final";
-      const idCliente = pedido?.idcliente ?? delivery.idcliente;
+      const idCliente = Number(pedido?.idcliente ?? delivery.idcliente) || 0;
       const clienteData = customerName !== "Consumidor Final"
         ? { id: idCliente, name: customerName }
         : null;
@@ -3515,7 +3515,7 @@ export default function BakeryDriverApp() {
       });
 
       const customerName = pedido?.customer || delivery.customer || "Consumidor Final";
-      const idCliente = pedido?.idcliente ?? delivery.idcliente;
+      const idCliente = Number(pedido?.idcliente ?? delivery.idcliente) || 0;
       const clienteData = customerName !== "Consumidor Final"
         ? { id: idCliente, name: customerName }
         : null;
