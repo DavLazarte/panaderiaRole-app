@@ -2959,6 +2959,10 @@ export default function BakeryDriverApp() {
     let baseList = products;
     if (isRepartoMode) {
       baseList = baseList.filter(p => (p as any).disponible_reparto === true || (p as any).disponible_reparto === 1);
+      // Para el repartidor en la calle, mostrar solo los productos en los que tiene stock cargado (si ya tiene mercadería despachada)
+      if (!isAdmin && baseList.some(p => p.quantity > 0)) {
+        baseList = baseList.filter(p => p.quantity > 0 || (cart[p.id] || 0) > 0);
+      }
     }
 
     if (posSearch) {
@@ -2966,8 +2970,13 @@ export default function BakeryDriverApp() {
       baseList = baseList.filter(p => p.name.toLowerCase().includes(q));
     }
     
-    return baseList.sort((a, b) => (b.sold_qty || 0) - (a.sold_qty || 0));
-  }, [products, posSearch, isVendedor, isAdmin, adminPosMode, isRepartidor, isPreventista]);
+    return [...baseList].sort((a, b) => {
+      const aStock = a.quantity > 0 ? 1 : 0;
+      const bStock = b.quantity > 0 ? 1 : 0;
+      if (aStock !== bStock) return bStock - aStock;
+      return (b.sold_qty || 0) - (a.sold_qty || 0);
+    });
+  }, [products, posSearch, isVendedor, isAdmin, adminPosMode, cart]);
 
   // Checkout state
   const [checkoutOpen, setCheckoutOpen] = useState(false);
@@ -5519,6 +5528,7 @@ export default function BakeryDriverApp() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                     {products
                       .filter(item => (item as any).disponible_reparto === true || (item as any).disponible_reparto === 1)
+                      .sort((a, b) => ((b.quantity > 0 ? 1 : 0) - (a.quantity > 0 ? 1 : 0)) || ((b.sold_qty || 0) - (a.sold_qty || 0)))
                       .map(item => (
                       <div key={item.id} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
                         <div>
