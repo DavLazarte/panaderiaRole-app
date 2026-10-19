@@ -246,12 +246,16 @@ export default function PosMostrador({
     }
   }, [tipoVenta, selectedClient]);
 
-  // Si cambia forma de pago a cuenta corriente, seleccionar tipo venta cuenta corriente
+  // Si cambia forma de pago a cuenta corriente, seleccionar tipo venta cuenta corriente (salvo que ya sea venta_reparto)
   const handleFormaPagoChange = (forma: string) => {
     setFormaPago(forma);
     if (forma === "cuenta_corriente") {
-      setTipoVenta("cuenta_corriente");
-      setClientDropdownOpen(true);
+      if (tipoVenta !== "venta_reparto") {
+        setTipoVenta("cuenta_corriente");
+      }
+      if (!selectedClient) {
+        setClientDropdownOpen(true);
+      }
     }
   };
 
@@ -750,7 +754,7 @@ export default function PosMostrador({
         })),
         total: totalFinal,
         idcliente: selectedClient?.id ?? null,
-        tipo_venta: formaPago === "mixto" && ctaCteNum > 0 && selectedClient ? "cuenta_corriente" : tipoVenta,
+        tipo_venta: formaPago === "mixto" && ctaCteNum > 0 && selectedClient && tipoVenta !== "venta_reparto" ? "cuenta_corriente" : tipoVenta,
         descuento,
         recargo,
         pago: esPedido ? anticipo : (formaPago === "mixto" ? totalCobradoContado : (formaPago === "saldo_a_favor" ? 0 : pagoNum)),
@@ -966,7 +970,10 @@ export default function PosMostrador({
                   )}
                   <button
                     type="button"
-                    onClick={() => { setSelectedClient(null); setTipoVenta("venta_rapida"); }}
+                    onClick={() => {
+                      setSelectedClient(null);
+                      if (tipoVenta === "cuenta_corriente") setTipoVenta("venta_rapida");
+                    }}
                     className="hover:text-red-400 transition-colors rounded-lg hover:bg-white/5"
                     style={{ padding: "0.25rem", marginLeft: "0.25rem" }}
                   >
@@ -1004,7 +1011,9 @@ export default function PosMostrador({
                               key={c.id}
                               onClick={() => {
                                 setSelectedClient(c);
-                                setTipoVenta("cuenta_corriente");
+                                if (tipoVenta !== "venta_reparto") {
+                                  setTipoVenta("cuenta_corriente");
+                                }
                                 setClientSearch("");
                                 setClientDropdownOpen(false);
                               }}
