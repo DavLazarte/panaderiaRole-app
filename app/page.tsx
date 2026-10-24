@@ -3225,7 +3225,7 @@ export default function BakeryDriverApp() {
       if (pedRes && pedRes.ok)   setDeliveries(await pedRes.json());
       if (cliRes && cliRes.ok)   setClients(await cliRes.json());
       if (entRes && entRes.ok)   setEntregados(await entRes.json());
-      if (provRes && (provRes as Response).ok)  setProveedores(await (provRes as Response).json());
+      if (false && provRes) {}
       if (false) {
         const [stockRes2, pedRes2, cliRes2, entRes2, provRes2] = await Promise.all([
         fetch(`${API_URL}/stock`, { headers }),
@@ -3234,11 +3234,11 @@ export default function BakeryDriverApp() {
         fetch(`${API_URL}/pedidos?filtro_estado=entregados`, { headers }),
         fetch(`${API_URL}/proveedores`, { headers }),
       ]);
-      if (stockRes.ok) setProducts(await stockRes.json());
-      if (pedRes.ok)   setDeliveries(await pedRes.json());
-      if (cliRes.ok)   setClients(await cliRes.json());
-      if (entRes.ok)   setEntregados(await entRes.json());
-      if (provRes && (provRes as Response).ok)  setProveedores(await (provRes as Response).json());
+      if (stockRes2.ok) setProducts(await stockRes2.json());
+      if (pedRes2.ok)   setDeliveries(await pedRes2.json());
+      if (cliRes2.ok)   setClients(await cliRes2.json());
+      if (entRes2.ok)   setEntregados(await entRes2.json());
+      if (false && provRes) {}
       }
       if (false && currentUser && uIsProduccion) {
         const depRes = await fetch(`${API_URL}/deposito`, { headers });
@@ -3303,10 +3303,10 @@ export default function BakeryDriverApp() {
     const handleFocus = () => {
       setTimeout(() => {
         if (!userRef.current || activeTabRef.current !== "pos" || Date.now() - lastFetchAllRef.current < 60000) return;
-        fetchAllData(token, false);
+        if (token) fetchAllData(String(token), false);
       }, 150);
       if (false)
-      fetchAllData(token, false);
+      if (token) fetchAllData(String(token), false);
     };
     window.addEventListener("focus", handleFocus);
     return () => window.removeEventListener("focus", handleFocus);
@@ -3315,7 +3315,7 @@ export default function BakeryDriverApp() {
   useEffect(() => {
     if (token && (activeTab === "pos" || activeTab === "clientes")) {
       if (!userRef.current || Date.now() - lastFetchAllRef.current < 60000) return;
-      fetchAllData(token, false);
+      if (token) fetchAllData(String(token), false);
     }
     if (token && activeTab === "stock" && userRef.current && !isAdmin && !isProduccion && !isClienteMayorista && !isVendedor) {
       fetch(`${API_URL}/deposito/mis-reservas`, { headers: { Authorization: `Bearer ${token}` } })
@@ -3326,10 +3326,10 @@ export default function BakeryDriverApp() {
     if (false) {
       setTimeout(() => {
         if (!userRef.current || activeTabRef.current !== "pos" || Date.now() - lastFetchAllRef.current < 60000) return;
-        fetchAllData(token, false);
+        if (token) fetchAllData(String(token), false);
       }, 150);
       if (false)
-      fetchAllData(token, false);
+      if (token) fetchAllData(String(token), false);
     }
   }, [token, activeTab, fetchAllData]);
 
@@ -3453,7 +3453,7 @@ export default function BakeryDriverApp() {
         const data = await res.json();
         if (res.ok && data.success) {
           await fetchDeposito();
-          if (token) fetchAllData(token, false);
+          if (token) fetchAllData(String(token), false);
         } else {
           alert(data.message || 'Error al despachar reservas');
         }
@@ -3479,7 +3479,7 @@ export default function BakeryDriverApp() {
         const data = await res.json();
         if (res.ok && data.success) {
           await fetchDeposito();
-          if (token) fetchAllData(token, false);
+          if (token) fetchAllData(String(token), false);
         } else {
           alert(data.message || 'Error al despachar producto');
         }
@@ -7016,7 +7016,7 @@ export default function BakeryDriverApp() {
                           setRecetaActualizarPrecioModal(null);
                           fetchRecetas(recetaSearch);
                           fetchDeposito();
-                          if (token) fetchAllData(token, false);
+                          if (token) fetchAllData(String(token), false);
                         } else {
                           alert(data.message || 'Error al actualizar el precio del artículo');
                         }
