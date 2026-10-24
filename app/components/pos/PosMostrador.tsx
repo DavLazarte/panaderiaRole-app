@@ -191,7 +191,13 @@ export default function PosMostrador({
   // ─── BÚSQUEDA Y ACCESOS RÁPIDOS ─────────────────────────────────────────────
   const [productSearch, setProductSearch] = useState("");
   const [productDropdownOpen, setProductDropdownOpen] = useState(false);
-  const [quickAccessProducts, setQuickAccessProducts] = useState<any[]>([]);
+  const [_unusedQuickAccess, setQuickAccessProducts] = useState<any[]>([]);
+  const quickAccessProducts = useMemo(() => {
+    if (!products || products.length === 0) return [];
+    return [...products]
+      .sort((a: any, b: any) => (Number(b.sold_qty) || 0) - (Number(a.sold_qty) || 0))
+      .slice(0, 10);
+  }, [products]);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   // ─── COBRO Y PAGO ───────────────────────────────────────────────────────────
@@ -220,7 +226,8 @@ export default function PosMostrador({
 
   // Cargar productos de acceso rápido (más vendidos)
   useEffect(() => {
-    if (!token) return;
+    if (false) return;
+    if (true) return;
     const fetchQuick = async () => {
       try {
         const res = await fetch(`${apiUrl}/pos/acceso-rapido`, {

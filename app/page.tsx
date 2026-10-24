@@ -51,7 +51,7 @@ function SortableProductItem({ product, disabled, qty, onUpdateQuantity, onSetQu
             <input type="number" step="any" min="0" max={product.quantity} value={qty || ""} placeholder="0"
               onChange={(e) => onSetQuantity(product, e.target.value)}
               className="w-10 bg-transparent text-center text-sm font-bold outline-none" />
-            <button onClick={() => onUpdateQuantity(product, 1)} disabled={disabled || qty >= product.quantity}
+            <button onClick={() => onUpdateQuantity(product, 1)} disabled={disabled}
               className="h-8 w-8 rounded-full bg-brand-red text-white flex items-center justify-center shadow-lg hover:bg-red-600 disabled:opacity-30 disabled:bg-white/10 disabled:text-white/30">
               <Plus className="h-4 w-4" />
             </button>
@@ -569,7 +569,7 @@ function CheckoutModal({
   useEffect(() => {
     if (open) {
       setStep(0); setClientSearch(""); setDescuento(0);
-      setRecargo(0); setFormaDePago("efectivo"); setEsPedido(false); setFechaEntrega("");
+      const faltaStock = !pedidoId && Object.entries(cart).some(([id, qty]) => qty > 0 && ((products.find(p => p.id === Number(id))?.quantity ?? 0) < qty)); const dManana = new Date(); dManana.setDate(dManana.getDate() + 1); const fechaManana = `${dManana.getFullYear()}-${String(dManana.getMonth() + 1).padStart(2, "0")}-${String(dManana.getDate()).padStart(2, "0")}`; setRecargo(0); setFormaDePago("efectivo"); setEsPedido(faltaStock); setFechaEntrega(faltaStock ? fechaManana : "");
       setPagoEfectivo("");
       setPagoTransferencia("");
       setPagoCtaCte("");
@@ -909,7 +909,7 @@ function CheckoutModal({
                 </>
               )}
             </div>
-            <div onClick={() => setEsPedido(!esPedido)}
+            <div onClick={() => { const sinStock = !pedidoId && Object.entries(cart).some(([id, qty]) => qty > 0 && ((products.find(p => p.id === Number(id))?.quantity ?? 0) < qty)); if (sinStock && esPedido) return; setEsPedido(!esPedido); }}
               className={`flex items-center justify-between rounded-2xl border p-4 cursor-pointer transition-all ${esPedido ? "border-brand-red/50 bg-brand-red/10" : "border-white/10 bg-white/5"}`}>
               <div className="flex items-center gap-3">
                 <Clock className={`h-5 w-5 ${esPedido ? "text-brand-yellow" : "text-zinc-500"}`} />
@@ -2430,6 +2430,9 @@ export default function BakeryDriverApp() {
   const [mpModal, setMpModal] = useState<null | 'crear' | 'editar'>(null);
   const [mpEditing, setMpEditing] = useState<any>(null);
   const [mpForm, setMpForm] = useState({ nombre: '', precio: 0, peso: 0, unidad_medida: 'kg' });
+  const [mpBulkEditMode, setMpBulkEditMode] = useState(false);
+  const [mpBulkPrices, setMpBulkPrices] = useState<Record<number, string>>({});
+  const [savingMpBulk, setSavingMpBulk] = useState(false);
 
   // ── Recetas state ────────────────────────────────────────────────────────────
   const [recetas, setRecetas] = useState<any[]>([]);
@@ -2448,6 +2451,27 @@ export default function BakeryDriverApp() {
   const [recetaIngSearch, setRecetaIngSearch] = useState('');
   const [recetaEjecutarModal, setRecetaEjecutarModal] = useState<any>(null);
   const [recetaEjecutarQty, setRecetaEjecutarQty] = useState(1);
+  const [recetaActualizarPrecioModal, setRecetaActualizarPrecioModal] = useState<any>(null);
+  const [recetaPrecioArtForm, setRecetaPrecioArtForm] = useState<{ precio_unitario: string; precio_reparto: string; precio_bar: string }>({
+    precio_unitario: '',
+    precio_reparto: '',
+    precio_bar: '',
+  });
+  const [savingPrecioArt, setSavingPrecioArt] = useState(false);
+
+  const calcularCostoIngrediente = useCallback((ing: any) => {
+    const qty = parseFloat(String(ing.cantidad ?? 0).replace(',', '.')) || 0;
+    const p = parseFloat(String(ing.precio ?? 0).replace(',', '.')) || 0;
+    const peso = Math.max(0.0001, parseFloat(String(ing.peso ?? 1).replace(',', '.')) || 1);
+    const u = String(ing.unidad || '').toLowerCase().trim();
+    let consumo = qty / peso;
+    if (['g', 'gr', 'grs', 'gramos', 'gramo', 'ml', 'cc', 'cm3', 'mililitro', 'mililitros'].includes(u)) {
+      consumo = qty / (peso > 100 ? peso : peso * 1000);
+    } else if (['kg', 'kgs', 'kilo', 'kilos', 'kilogramo', 'kilogramos', 'l', 'lt', 'lts', 'litro', 'litros'].includes(u)) {
+      consumo = qty / (peso > 100 ? peso / 1000 : peso);
+    }
+    return consumo * p;
+  }, []);
 
   // Math for Receta
   const recetaTotalPages = Math.ceil(recetas.length / 6) || 1;
@@ -2456,7 +2480,7 @@ export default function BakeryDriverApp() {
       const p = parseFloat(i.precio) || 0;
       const w = parseFloat(i.peso) || 1;
       const qty = parseFloat(i.cantidad) || 0;
-      return sum + (qty * p / Math.max(1, w));
+      return sum + calcularCostoIngrediente(i);
     }, 0);
   }, [recetaIngredientes]);
 
@@ -2477,8 +2501,10 @@ export default function BakeryDriverApp() {
         costo_elaboracion: costo_elaboracion.toFixed(2),
         costo_unitario: costo_unitario.toFixed(2),
         ganancia: ganancia.toFixed(2),
-        precio_unitario: precio_unitario.toFixed(2),
-        precio_iva: precio_iva.toFixed(2)
+        precio_unitario: prev.precioManual ? prev.precio_unitario : precio_unitario.toFixed(2),
+        precio_iva: prev.precioManual ? prev.precio_iva : precio_iva.toFixed(2),
+        precio_sugerido_calc: precio_iva.toFixed(2),
+
       }));
     }
   }, [subtotalIngredientes, recetaForm.empleado, recetaForm.porciones, recetaForm.porcentaje_ganancia, recetaForm.iva, recetaModal]);
@@ -2553,7 +2579,7 @@ export default function BakeryDriverApp() {
   const historyFormaPago = historyActiveFilter?.type === 'payment' ? (historyActiveFilter.value as string) : '';
 
   useEffect(() => {
-    if (!token || !user) return;
+    if (!token || !user || (activeTab !== 'ventas' && cajaTurnoModal !== 'cerrar')) return;
     
     const fetchHistory = async () => {
       setLoadingHistory(true);
@@ -2584,7 +2610,7 @@ export default function BakeryDriverApp() {
           setHistoryCajas(data.cajas || []);
         }
 
-        if (user.roles?.some((r: string) => r.toLowerCase() === 'admin')) {
+        if (user.roles?.some((r: string) => r.toLowerCase() === 'admin') && historyTab === 'estadisticas') {
           const statsRes = await fetch(`${API_URL}/admin/estadisticas/productos?${queryParams}`, { headers });
           if (statsRes.ok) setProductStats(await statsRes.json());
           
@@ -2599,9 +2625,10 @@ export default function BakeryDriverApp() {
       fetchHistory();
     }, 400);
     return () => clearTimeout(delayDebounceFn);
-  }, [token, user, historyFilterType, historyDate, historyStartDate, historyEndDate, historyMonthYear, historyRefresh, historyPage, historySearch, historyType, historyFormaPago]);
+  }, [token, user, activeTab, historyTab, cajaTurnoModal, historyFilterType, historyDate, historyStartDate, historyEndDate, historyMonthYear, historyRefresh, historyPage, historySearch, historyType, historyFormaPago]);
 
   const fetchCajaTurno = async () => {
+    if (!token || (!isAdmin && !isVendedor)) return;
     if (!token) return;
     try {
       const res = await fetch(`${API_URL}/admin/caja-activa`, { 
@@ -2655,6 +2682,7 @@ export default function BakeryDriverApp() {
   }, [token]);
 
   useEffect(() => {
+    if (activeTab !== 'ventas') return;
     if (token) {
       fetchCajaTurno();
       if (historyTab === 'cierres') {
@@ -2664,7 +2692,7 @@ export default function BakeryDriverApp() {
         fetchTesoreria();
       }
     }
-  }, [token, activeTab, historyTab, historyRefresh, fetchTesoreria]);
+  }, [token, isAdmin, isVendedor, activeTab === 'ventas' ? historyTab : null, historyRefresh, fetchTesoreria]);
 
   useEffect(() => {
     if (isAdmin && cajaTurnoModal === 'abrir' && cajerosList.length === 0 && token) {
@@ -2917,6 +2945,13 @@ export default function BakeryDriverApp() {
 
   useEffect(() => {
     if (!token || !user?.roles?.some((r: string) => r.toLowerCase() === 'admin')) return;
+    if (activeTab !== 'stock') return;
+    if (categorias.length === 0) {
+      fetch(`${API_URL}/categorias`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.ok ? r.json() : [])
+        .then(d => { if (Array.isArray(d)) setCategorias(d); })
+        .catch(() => {});
+    }
     const fetchAdminStock = async () => {
       setLoadingAdminStock(true);
       try {
@@ -2948,7 +2983,7 @@ export default function BakeryDriverApp() {
       }, 400);
       return () => clearTimeout(delayDebounceFn);
     }
-  }, [token, user, adminStockPage, adminStockSearch, adminStockRefresh]);
+  }, [token, user, activeTab, adminStockPage, adminStockSearch, adminStockRefresh]);
 
   // POS search and sorting state
   const [posSearch, setPosSearch] = useState("");
@@ -2961,7 +2996,7 @@ export default function BakeryDriverApp() {
       baseList = baseList.filter(p => (p as any).disponible_reparto === true || (p as any).disponible_reparto === 1);
       // Para el repartidor en la calle, mostrar solo los productos en los que tiene stock cargado (si ya tiene mercadería despachada)
       if (!isAdmin && baseList.some(p => p.quantity > 0)) {
-        baseList = baseList.filter(p => p.quantity > 0 || (cart[p.id] || 0) > 0);
+        // Se muestran todos los de reparto: primero los que tienen stock > 0 y luego los de 0 disp. para reservas
       }
     }
 
@@ -3051,6 +3086,14 @@ export default function BakeryDriverApp() {
 
   useEffect(() => {
     if (!token || !user?.roles?.some((r: string) => r.toLowerCase() === 'admin')) return;
+    if (activeTab !== 'clientes') return;
+    if (proveedores.length === 0) fetchProveedores();
+    if (adminUsers.length === 0) {
+      fetch(`${API_URL}/admin/users/mayoristas`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.ok ? r.json() : [])
+        .then(d => { if (Array.isArray(d)) setAdminUsers(d); })
+        .catch(() => {});
+    }
     const fetchAdminPersonas = async () => {
       if (adminPersonasPage === 1) setLoadingAdminPersonas(true);
       try {
@@ -3077,7 +3120,7 @@ export default function BakeryDriverApp() {
       fetchAdminPersonas();
     }, 400);
     return () => clearTimeout(delayDebounceFn);
-  }, [token, user, adminPersonasPage, adminPersonasSearch, adminPersonasTipo, adminPersonasRefresh]);
+  }, [token, user, activeTab, adminPersonasPage, adminPersonasSearch, adminPersonasTipo, adminPersonasRefresh]);
 
   const handleSavePersona = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -3136,25 +3179,55 @@ export default function BakeryDriverApp() {
   const [reutilizarPedido, setReutilizarPedido] = useState<{ cliente: { id: number; name: string } | null; items?: SaleItem[] } | null>(null);
 
   useEffect(() => {
+    if (initialAuthFetchedRef.current) return;
+    initialAuthFetchedRef.current = true;
     const savedToken = localStorage.getItem("token");
     if (savedToken) { setToken(savedToken); fetchUser(savedToken); }
     else setLoading(false);
   }, []);
 
+  const initialAuthFetchedRef = useRef<boolean>(false);
+  const userRef = useRef<any>(null);
+  userRef.current = user;
+  const activeTabRef = useRef<string>(activeTab);
+  activeTabRef.current = activeTab;
+  const lastFetchAllRef = useRef<number>(0);
+  const fetchingAllRef = useRef<boolean>(false);
+
   const fetchUser = async (authToken: string) => {
     try {
       const res = await fetch(`${API_URL}/user`, { headers: { Authorization: `Bearer ${authToken}` } });
-      if (res.ok) { const u = await res.json(); setUser(u); fetchAllData(authToken); }
+      if (res.ok) { const u = await res.json(); userRef.current = u; setUser(u); fetchAllData(authToken, true, u); }
       else logout();
     } catch { logout(); }
   };
 
-  const fetchAllData = useCallback(async (authToken: string, full: boolean = true) => {
+  const fetchAllData = useCallback(async (authToken: string, full: boolean = true, explicitUser?: any) => {
+    if (fetchingAllRef.current) return;
+    fetchingAllRef.current = true;
+    lastFetchAllRef.current = Date.now();
+    const currentUser = explicitUser || userRef.current;
+    const uRoles: string[] = (currentUser?.roles || []).map((r: string) => String(r).toLowerCase());
+    const uIsProduccion = uRoles.includes('produccion');
+    const uIsMayorista = uRoles.some(r => ['cliente_mayorista', 'cliente mayorista', 'cliente'].includes(r));
     // Si no es full, no bloqueamos toda la UI con setLoading(true) (asumiendo que loading solo se usa en login)
     if (full) setLoading(true);
     const headers = { Authorization: `Bearer ${authToken}` };
     try {
       const [stockRes, pedRes, cliRes, entRes, provRes] = await Promise.all([
+        uIsProduccion ? Promise.resolve(null) : fetch(`${API_URL}/stock`, { headers }),
+        fetch(`${API_URL}/pedidos?filtro_estado=pendientes`, { headers }),
+        (uIsProduccion || uIsMayorista) ? Promise.resolve(null) : fetch(`${API_URL}/clientes`, { headers }),
+        uIsMayorista ? fetch(`${API_URL}/pedidos?filtro_estado=entregados`, { headers }) : Promise.resolve(null),
+        Promise.resolve(null),
+      ]);
+      if (stockRes && stockRes.ok) setProducts(await stockRes.json());
+      if (pedRes && pedRes.ok)   setDeliveries(await pedRes.json());
+      if (cliRes && cliRes.ok)   setClients(await cliRes.json());
+      if (entRes && entRes.ok)   setEntregados(await entRes.json());
+      if (provRes && (provRes as Response).ok)  setProveedores(await (provRes as Response).json());
+      if (false) {
+        const [stockRes2, pedRes2, cliRes2, entRes2, provRes2] = await Promise.all([
         fetch(`${API_URL}/stock`, { headers }),
         fetch(`${API_URL}/pedidos?filtro_estado=pendientes`, { headers }),
         fetch(`${API_URL}/clientes`, { headers }),
@@ -3165,7 +3238,19 @@ export default function BakeryDriverApp() {
       if (pedRes.ok)   setDeliveries(await pedRes.json());
       if (cliRes.ok)   setClients(await cliRes.json());
       if (entRes.ok)   setEntregados(await entRes.json());
-      if (provRes.ok)  setProveedores(await provRes.json());
+      if (provRes && (provRes as Response).ok)  setProveedores(await (provRes as Response).json());
+      }
+      if (false && currentUser && uIsProduccion) {
+        const depRes = await fetch(`${API_URL}/deposito`, { headers });
+        if (depRes.ok) {
+          const depData = await depRes.json();
+          setDepositoArticulos(depData.articulos ?? []);
+          setDepositoMP(depData.materias_primas ?? []);
+          setDepositoReservasPendientes(depData.reservas_pendientes ?? []);
+          setRepartidores(depData.repartidores ?? []);
+        }
+      }
+      if (false) {
       
       if (full) {
         const usrRes = await fetch(`${API_URL}/user`, { headers });
@@ -3176,27 +3261,51 @@ export default function BakeryDriverApp() {
             if (catRes.ok) setCategorias(await catRes.json());
             const mayRes = await fetch(`${API_URL}/admin/users/mayoristas`, { headers });
             if (mayRes.ok) setAdminUsers(await mayRes.json());
+            const depRes = await fetch(`${API_URL}/deposito`, { headers });
+            if (depRes.ok) {
+              const depData = await depRes.json();
+              setDepositoArticulos(depData.articulos ?? []);
+              setDepositoMP(depData.materias_primas ?? []);
+              setDepositoReservasPendientes(depData.reservas_pendientes ?? []);
+              setRepartidores(depData.repartidores ?? []);
+            }
           } else {
             const reservasRes = await fetch(`${API_URL}/deposito/mis-reservas`, { headers });
             if (reservasRes.ok) setMisReservas(await reservasRes.json());
           }
         }
       } else {
-        // Even on partial refresh, update driver reservations
+        // Even on partial refresh, update driver reservations and admin deposito badge
+        if (user?.roles?.some((r: string) => r.toLowerCase() === 'admin' || r.toLowerCase() === 'produccion')) {
+          const depRes = await fetch(`${API_URL}/deposito`, { headers });
+          if (depRes.ok) {
+            const depData = await depRes.json();
+            setDepositoArticulos(depData.articulos ?? []);
+            setDepositoMP(depData.materias_primas ?? []);
+            setDepositoReservasPendientes(depData.reservas_pendientes ?? []);
+            setRepartidores(depData.repartidores ?? []);
+          }
+        }
         if (!user?.roles?.some((r: string) => r.toLowerCase() === 'admin')) {
           const reservasRes = await fetch(`${API_URL}/deposito/mis-reservas`, { headers });
           if (reservasRes.ok) setMisReservas(await reservasRes.json());
         }
       }
-      setHistoryRefresh(prev => prev + 1);
+      if (activeTabRef.current === 'ventas') setHistoryRefresh(prev => prev + 1);
+      }
     } catch (err) { console.error(err); }
-    finally { if (full) setLoading(false); }
-  }, [user]);
+    finally { fetchingAllRef.current = false; if (full) setLoading(false); }
+  }, []);
 
   // Auto-refrescar datos al volver a la pestaña (focus) o al ingresar a POS / Personas
   useEffect(() => {
     if (!token) return;
     const handleFocus = () => {
+      setTimeout(() => {
+        if (!userRef.current || activeTabRef.current !== "pos" || Date.now() - lastFetchAllRef.current < 60000) return;
+        fetchAllData(token, false);
+      }, 150);
+      if (false)
       fetchAllData(token, false);
     };
     window.addEventListener("focus", handleFocus);
@@ -3205,6 +3314,21 @@ export default function BakeryDriverApp() {
 
   useEffect(() => {
     if (token && (activeTab === "pos" || activeTab === "clientes")) {
+      if (!userRef.current || Date.now() - lastFetchAllRef.current < 60000) return;
+      fetchAllData(token, false);
+    }
+    if (token && activeTab === "stock" && userRef.current && !isAdmin && !isProduccion && !isClienteMayorista && !isVendedor) {
+      fetch(`${API_URL}/deposito/mis-reservas`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.ok ? r.json() : [])
+        .then(d => { if (Array.isArray(d)) setMisReservas(d); })
+        .catch(() => {});
+    }
+    if (false) {
+      setTimeout(() => {
+        if (!userRef.current || activeTabRef.current !== "pos" || Date.now() - lastFetchAllRef.current < 60000) return;
+        fetchAllData(token, false);
+      }, 150);
+      if (false)
       fetchAllData(token, false);
     }
   }, [token, activeTab, fetchAllData]);
@@ -3267,6 +3391,261 @@ export default function BakeryDriverApp() {
     finally { setLoadingDeposito(false); }
   }, [token]);
 
+  const [reservaDestinoMap, setReservaDestinoMap] = useState<Record<string, string>>({});
+  const [despachandoReservaKey, setDespachandoReservaKey] = useState<string | null>(null);
+
+  const renderDepositoReservasTab = () => {
+    if (depositoReservasPendientes.length === 0) {
+      return <p className="text-center text-zinc-500 text-sm py-8">No hay reservas pendientes de despacho en depósito.</p>;
+    }
+
+    // Agrupar reservas por Pedido (o individual si no proviene de un pedido)
+    const groupsMap = new Map<string, {
+      key: string;
+      pedido_id: number | null;
+      cliente_nombre: string;
+      fecha_entrega: string | null;
+      solicitante: string;
+      default_repartidor_id: string;
+      created_at: string;
+      motivo: string;
+      items: any[];
+    }>();
+
+    depositoReservasPendientes.forEach((r: any) => {
+      const pid = r.pedido_id || (() => {
+        const m = r.motivo && String(r.motivo).match(/Pedido #(\d+)/i);
+        return m ? Number(m[1]) : null;
+      })();
+      const key = pid ? `pedido_${pid}` : `reserva_${r.id}`;
+      if (!groupsMap.has(key)) {
+        const cliMatch = r.motivo && String(r.motivo).match(/Cliente:\s*([^(]+)/i);
+        const fecMatch = r.motivo && String(r.motivo).match(/Entrega:\s*([^)]+)/i);
+        groupsMap.set(key, {
+          key,
+          pedido_id: pid,
+          cliente_nombre: r.cliente_nombre || (cliMatch ? cliMatch[1].trim() : 'Solicitud de Stock'),
+          fecha_entrega: r.fecha_entrega || (fecMatch ? fecMatch[1].trim() : null),
+          solicitante: r.solicitante || 'Usuario',
+          default_repartidor_id: r.repartidor_id ? String(r.repartidor_id) : '',
+          created_at: r.created_at || '',
+          motivo: r.motivo || '',
+          items: [],
+        });
+      }
+      groupsMap.get(key)!.items.push(r);
+    });
+
+    const groups = Array.from(groupsMap.values());
+
+    const handleDespacharBatch = async (groupKey: string, reservaIds: number[], targetUserId: string) => {
+      if (!targetUserId) {
+        alert('Por favor seleccioná a qué usuario despachar la mercadería.');
+        return;
+      }
+      setDespachandoReservaKey(groupKey);
+      try {
+        const res = await fetch(`${API_URL}/deposito/reservas/despachar-batch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ reserva_ids: reservaIds, repartidor_id: targetUserId }),
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          await fetchDeposito();
+          if (token) fetchAllData(token, false);
+        } else {
+          alert(data.message || 'Error al despachar reservas');
+        }
+      } catch {
+        alert('Error de conexión al despachar');
+      } finally {
+        setDespachandoReservaKey(null);
+      }
+    };
+
+    const handleDespacharIndividual = async (r: any, targetUserId: string) => {
+      if (!targetUserId) {
+        alert('Por favor seleccioná a qué usuario despachar este producto.');
+        return;
+      }
+      setDespachandoReservaKey(`item_${r.id}`);
+      try {
+        const res = await fetch(`${API_URL}/deposito/reservas/${r.id}/aprobar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ repartidor_id: targetUserId }),
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          await fetchDeposito();
+          if (token) fetchAllData(token, false);
+        } else {
+          alert(data.message || 'Error al despachar producto');
+        }
+      } catch {
+        alert('Error de conexión');
+      } finally {
+        setDespachandoReservaKey(null);
+      }
+    };
+
+    const handleCancelarReservaItem = async (id: number) => {
+      if (!confirm('¿Rechazar / cancelar esta reserva en depósito?')) return;
+      try {
+        const res = await fetch(`${API_URL}/deposito/reservas/${id}/cancelar`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        if (data.success) {
+          fetchDeposito();
+        } else {
+          alert(data.message || 'Error al cancelar');
+        }
+      } catch {
+        alert('Error de conexión');
+      }
+    };
+
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white/5 border border-white/10 rounded-2xl p-3.5">
+          <div>
+            <p className="text-xs font-bold text-brand-yellow uppercase tracking-wider">
+              🚚 Despacho Directo desde Reservas ({depositoReservasPendientes.length} ítems en {groups.length} {groups.length === 1 ? 'pedido' : 'pedidos'})
+            </p>
+            <p className="text-[11px] text-zinc-400 mt-0.5">
+              Elegí el usuario que entregará el pedido y cargale la mercadería directo a su stock sin pasar por Despacho.
+            </p>
+          </div>
+        </div>
+
+        {groups.map(group => {
+          const selectedUser = reservaDestinoMap[group.key] !== undefined
+            ? reservaDestinoMap[group.key]
+            : group.default_repartidor_id;
+
+          return (
+            <div key={group.key} className="rounded-2xl border border-brand-yellow/25 bg-brand-yellow/5 p-4 space-y-3 shadow-lg">
+              {/* Cabecera del Pedido / Grupo */}
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-white/10">
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {group.pedido_id ? (
+                      <span className="px-2.5 py-0.5 rounded-lg bg-brand-red text-white text-xs font-extrabold">
+                        Pedido #{group.pedido_id}
+                      </span>
+                    ) : (
+                      <span className="px-2.5 py-0.5 rounded-lg bg-white/10 text-zinc-300 text-xs font-bold">
+                        Reserva
+                      </span>
+                    )}
+                    <span className="text-sm sm:text-base font-bold text-white">
+                      {group.cliente_nombre}
+                    </span>
+                    {group.fecha_entrega && (
+                      <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                        📅 Entrega: {group.fecha_entrega}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-zinc-400">
+                    Generado por: <strong className="text-zinc-200">{group.solicitante}</strong> · {group.created_at}
+                  </p>
+                </div>
+
+                {/* Selector de Usuario Destino + Botón Despachar Pedido Completo */}
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-xl px-3 py-1.5">
+                    <span className="text-[11px] text-zinc-400 font-semibold whitespace-nowrap">Cargar stock a:</span>
+                    <select
+                      value={selectedUser}
+                      onChange={e => setReservaDestinoMap(prev => ({ ...prev, [group.key]: e.target.value }))}
+                      className="bg-transparent text-xs font-bold text-brand-yellow outline-none cursor-pointer"
+                    >
+                      <option value="" className="bg-zinc-900 text-zinc-400">Seleccionar usuario...</option>
+                      {repartidores.map(rep => (
+                        <option key={rep.id} value={String(rep.id)} className="bg-zinc-900 text-white">
+                          👤 {rep.name} {String(rep.id) === group.default_repartidor_id ? '★ (Hizo el pedido)' : ''}
+                        </option>
+                      ))}
+                      <option value="panaderia" className="bg-zinc-900 text-amber-300">
+                        🥖 Panadería / Mostrador Local
+                      </option>
+                    </select>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={despachandoReservaKey === group.key}
+                    onClick={() => handleDespacharBatch(group.key, group.items.map(i => i.id), selectedUser)}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-extrabold transition-all active:scale-95 flex items-center justify-center gap-1.5 shadow-md shadow-emerald-900/30 cursor-pointer disabled:opacity-50"
+                  >
+                    <Truck className="w-4 h-4" />
+                    <span>
+                      {despachandoReservaKey === group.key
+                        ? 'Cargando...'
+                        : group.items.length > 1
+                          ? `Despachar Todo (${group.items.length})`
+                          : 'Despachar al Usuario'}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Lista de Productos Reservados en este Pedido */}
+              <div className="space-y-2">
+                {group.items.map(r => {
+                  const artDep = depositoArticulos.find(a => Number(a.id) === Number(r.item_id));
+                  const enDeposito = artDep ? Number(artDep.stock_deposito ?? 0) : 0;
+                  const alcanza = enDeposito >= Number(r.cantidad);
+
+                  return (
+                    <div key={r.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-black/30 border border-white/5 rounded-xl px-3.5 py-2.5">
+                      <div className="flex items-center justify-between sm:justify-start gap-3 min-w-0">
+                        <div>
+                          <p className="text-sm font-semibold text-white">{r.item_nombre}</p>
+                          <p className={`text-[11px] font-medium ${alcanza ? 'text-zinc-400' : 'text-red-400 font-bold'}`}>
+                            En depósito: {enDeposito} {artDep?.unidad_medida || 'u.'}
+                            {!alcanza && ` · ⚠️ Faltan ${(Number(r.cantidad) - enDeposito).toFixed(2).replace(/\.00$/, '')}`}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2 shrink-0">
+                        <span className="text-sm font-extrabold text-brand-yellow bg-brand-yellow/10 border border-brand-yellow/20 px-3 py-1 rounded-lg">
+                          {r.cantidad} {artDep?.unidad_medida && artDep.unidad_medida !== 'unidades' ? artDep.unidad_medida : 'u.'}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={despachandoReservaKey === `item_${r.id}`}
+                          onClick={() => handleDespacharIndividual(r, selectedUser)}
+                          className="px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 rounded-lg text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+                          title="Cargar solo este ítem al stock del usuario seleccionado"
+                        >
+                          {despachandoReservaKey === `item_${r.id}` ? '...' : '🚚 Cargar'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCancelarReservaItem(r.id)}
+                          className="px-2.5 py-1.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                          title="Rechazar / cancelar reserva de este ítem"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   const fetchDepositoMovimientos = useCallback(async () => {
     if (!token) return;
     try {
@@ -3298,11 +3677,11 @@ export default function BakeryDriverApp() {
     return () => window.removeEventListener('compra-registrada', handleCompraRegistrada);
   }, [fetchDeposito, fetchDepositoMovimientos]);
 
-  const fetchMateriaPrimas = useCallback(async (page = 1, search = '') => {
+  const fetchMateriaPrimas = useCallback(async (page = 1, search = '', perPage = 20) => {
     if (!token) return;
     setLoadingMP(true);
     try {
-      const params = new URLSearchParams({ page: page.toString(), per_page: '20' });
+      const params = new URLSearchParams({ page: page.toString(), per_page: perPage.toString() });
       if (search) params.append('search', search);
       const res = await fetch(`${API_URL}/admin/materias-primas?${params}`, { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) {
@@ -3327,7 +3706,7 @@ export default function BakeryDriverApp() {
   }, [token]);
 
   useEffect(() => {
-    if (activeTab === 'deposito') {
+    if (activeTab === 'deposito' || activeTab === 'despacho' || (activeTab === 'stock' && isAdmin && repartidores.length === 0)) {
       fetchDeposito();
     }
   }, [activeTab, fetchDeposito]);
@@ -3361,7 +3740,7 @@ export default function BakeryDriverApp() {
       if (data.success) {
         localStorage.setItem("token", data.token);
         setToken(data.token); setUser(data.user); setActiveTab("pos");
-        fetchAllData(data.token);
+        userRef.current = data.user; fetchAllData(data.token, true, data.user);
       } else { alert(data.message); setLoading(false); }
     } catch { alert("Error de conexión"); setLoading(false); }
   };
@@ -3372,7 +3751,7 @@ export default function BakeryDriverApp() {
 
   const updateQuantity = (product: Product, change: number) => {
     setCart(prev => {
-      const maxLimit = isClienteMayorista ? 99999 : product.quantity;
+      const maxLimit = (isClienteMayorista || isPreventista) ? 99999 : product.quantity;
       const next = Math.max(0, Math.min(maxLimit, (prev[product.id] || 0) + change));
       return { ...prev, [product.id]: next };
     });
@@ -3385,7 +3764,7 @@ export default function BakeryDriverApp() {
     }
     const parsed = parseFloat(value.replace(",", "."));
     if (isNaN(parsed)) return;
-    const maxLimit = isClienteMayorista ? 99999 : product.quantity;
+    const maxLimit = (isClienteMayorista || isPreventista) ? 99999 : product.quantity;
     const clamped = Math.max(0, Math.min(maxLimit, Math.round(parsed * 1000) / 1000));
     setCart(prev => ({ ...prev, [product.id]: clamped }));
   };
@@ -3865,7 +4244,7 @@ export default function BakeryDriverApp() {
   const NavButton = ({ icon: Icon, label, value, prominent, badge }: any) => (
     <button onClick={() => {
       setActiveTab(value);
-      if (value === 'deposito') fetchDeposito();
+      if (false && value === 'deposito') fetchDeposito();
     }}
       className={`flex flex-col items-center justify-center gap-1 transition-all duration-300 relative ${activeTab === value ? "text-brand-red" : "text-zinc-400"}`}>
       <div className={`flex items-center justify-center rounded-2xl transition-all duration-300 relative ${
@@ -4025,20 +4404,20 @@ export default function BakeryDriverApp() {
                     )}
                     <button onClick={() => setActiveTab('pos')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'pos' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><ShoppingCart className="w-5 h-5"/> <span className="font-semibold text-sm">Venta Rápida</span></button>
                     {!isVendedor && (
-                      <button onClick={() => { setActiveTab('clientes'); fetchProveedores(); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'clientes' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Users className="w-5 h-5"/> <span className="font-semibold text-sm">Personas</span></button>
+                      <button onClick={() => setActiveTab('clientes')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'clientes' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Users className="w-5 h-5"/> <span className="font-semibold text-sm">Personas</span></button>
                     )}
                     <button onClick={() => setActiveTab('ventas')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'ventas' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}><Receipt className="w-5 h-5"/> <span className="font-semibold text-sm">Historial</span></button>
                   </>
                 )}
                 
                 {(isAdmin || isProduccion) && (
-                  <button onClick={() => { setActiveTab('deposito'); fetchDeposito(); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'deposito' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
+                  <button onClick={() => setActiveTab('deposito')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'deposito' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
                     <Warehouse className="w-5 h-5"/> <span className="font-semibold text-sm">Depósito</span>
                     {depositoReservasPendientes.length > 0 && <span className="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">{depositoReservasPendientes.length}</span>}
                   </button>
                 )}
                 {isAdmin && (
-                  <button onClick={() => { setActiveTab('materias'); fetchMateriaPrimas(mpPage, mpSearch); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'materias' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
+                  <button onClick={() => setActiveTab('materias')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'materias' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
                     <ClipboardList className="w-5 h-5"/> <span className="font-semibold text-sm">Materias Primas</span>
                   </button>
                 )}
@@ -4048,12 +4427,12 @@ export default function BakeryDriverApp() {
                   </button>
                 )}
                 {isAdmin && (
-                  <button onClick={() => { setActiveTab('recetas'); fetchRecetas(recetaSearch); fetchMateriaPrimas(1, ''); fetchDeposito(); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'recetas' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
+                  <button onClick={() => setActiveTab('recetas')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'recetas' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
                     <CheckCircle2 className="w-5 h-5"/> <span className="font-semibold text-sm">Recetas</span>
                   </button>
                 )}
                 {isAdmin && (
-                  <button onClick={() => { setActiveTab('despacho'); fetchDeposito(); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'despacho' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
+                  <button onClick={() => setActiveTab('despacho')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'despacho' ? 'bg-brand-red/20 text-brand-yellow' : 'hover:bg-white/5 text-zinc-400'}`}>
                     <Truck className="w-5 h-5"/> <span className="font-semibold text-sm">Despacho</span>
                   </button>
                 )}
@@ -4525,7 +4904,7 @@ export default function BakeryDriverApp() {
                       <SortableContext items={displayedProducts.map(p => p.id)} strategy={rectSortingStrategy}>
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                           {displayedProducts.map(product => {
-                            const disabled = product.quantity === 0;
+                            const disabled = !isPreventista && product.quantity === 0;
                             const qty = cart[product.id] || 0;
                             return (
                               <SortableProductItem
@@ -4545,7 +4924,7 @@ export default function BakeryDriverApp() {
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                       {displayedProducts.map(product => {
-                        const disabled = product.quantity === 0;
+                        const disabled = !isPreventista && product.quantity === 0;
                         const qty = cart[product.id] || 0;
                         return (
                           <div key={product.id}
@@ -4566,7 +4945,7 @@ export default function BakeryDriverApp() {
                                 type="number"
                                 step="any"
                                 min={0}
-                                max={product.quantity}
+                                max={(isClienteMayorista || isPreventista) ? undefined : product.quantity}
                                 value={qty === 0 ? "" : qty}
                                 onChange={e => handleSetQuantity(product, e.target.value)}
                                 onBlur={() => {
@@ -5542,7 +5921,7 @@ export default function BakeryDriverApp() {
                               <span className="text-[10px] text-emerald-400 mt-0.5">+{item.reserved_qty} reservados</span>
                             )}
                           </div>
-                          <button onClick={() => setReservaModalItem(item)}
+                          <button style={{ display: 'none' }} onClick={() => setReservaModalItem(item)}
                             className="text-[10px] uppercase tracking-wider bg-white/10 text-zinc-300 px-2 py-1 rounded-lg hover:bg-white/20 transition-colors border border-white/10">
                             + Solicitar
                           </button>
@@ -5605,6 +5984,98 @@ export default function BakeryDriverApp() {
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <h1 className="text-2xl font-bold">Materias Primas</h1>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextMode = !mpBulkEditMode;
+                      setMpBulkEditMode(nextMode);
+                      if (nextMode) {
+                        const initPrices: Record<number, string> = {};
+                        materiaPrimas.forEach((m: any) => { initPrices[m.id] = String(m.precio ?? 0); });
+                        setMpBulkPrices(initPrices);
+                        fetchMateriaPrimas(1, mpSearch, 200);
+                      } else {
+                        setMpBulkPrices({});
+                        fetchMateriaPrimas(mpPage, mpSearch, 20);
+                      }
+                    }}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors shrink-0 border ${
+                      mpBulkEditMode
+                        ? 'bg-amber-500 text-zinc-950 border-amber-400 font-bold shadow-lg shadow-amber-500/20'
+                        : 'bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20'
+                    }`}
+                  >
+                    <Edit2 className="w-4 h-4" />
+                    {mpBulkEditMode ? 'Salir de Edición Masiva' : '⚡ Actualizar Precios Masivo'}
+                  </button>
+                  <button onClick={() => { setMpForm({ nombre: '', precio: 0, peso: 0, unidad_medida: 'kg' }); setMpEditing(null); setMpModal('crear'); }}
+                    className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-emerald-500/20 transition-colors shrink-0">
+                    <Plus className="w-4 h-4" /> Nueva Materia Prima
+                  </button>
+                </div>
+              </div>
+              {mpBulkEditMode && (() => {
+                const modifiedItems = materiaPrimas.filter((m: any) => {
+                  const raw = mpBulkPrices[m.id];
+                  if (raw === undefined || raw === '') return false;
+                  const num = parseFloat(String(raw).replace(',', '.'));
+                  return !isNaN(num) && num >= 0 && Math.abs(num - Number(m.precio ?? 0)) > 0.001;
+                });
+                return (
+                  <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-bold text-amber-300 uppercase tracking-wider">
+                        ⚡ Modo Actualización Rápida de Precios de Proveedor
+                      </p>
+                      <p className="text-xs text-zinc-300 mt-0.5">
+                        Escribí el nuevo precio de compra directamente en cada materia prima. Al guardar, se recalcularán automáticamente todas las recetas vinculadas.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        disabled={savingMpBulk || modifiedItems.length === 0}
+                        onClick={async () => {
+                          if (modifiedItems.length === 0) return;
+                          setSavingMpBulk(true);
+                          try {
+                            const payload = modifiedItems.map((m: any) => ({
+                              id: m.id,
+                              precio: parseFloat(String(mpBulkPrices[m.id]).replace(',', '.')) || 0,
+                            }));
+                            const res = await fetch(`${API_URL}/admin/materias-primas/precios-masivo`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                              body: JSON.stringify({ items: payload }),
+                            });
+                            const data = await res.json();
+                            if (res.ok && data.success) {
+                              alert(`✅ ${data.message}`);
+                              setMpBulkEditMode(false);
+                              setMpBulkPrices({});
+                              fetchMateriaPrimas(mpPage, mpSearch, 20);
+                              fetchRecetas(recetaSearch);
+                              fetchDeposito();
+                            } else {
+                              alert(data.message || 'Error al actualizar precios');
+                            }
+                          } catch {
+                            alert('Error de conexión al guardar precios');
+                          } finally {
+                            setSavingMpBulk(false);
+                          }
+                        }}
+                        className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:bg-zinc-800 disabled:text-zinc-500 text-zinc-950 font-extrabold text-xs transition-all flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 cursor-pointer"
+                      >
+                        <Check className="w-4 h-4" />
+                        {savingMpBulk ? 'Guardando...' : `Guardar Cambios (${modifiedItems.length}) y Recalcular Recetas`}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+              <div className="hidden" data-noop="true">
                 <button onClick={() => { setMpForm({ nombre: '', precio: 0, peso: 0, unidad_medida: 'kg' }); setMpEditing(null); setMpModal('crear'); }}
                   className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-emerald-500/20 transition-colors shrink-0">
                   <Plus className="w-4 h-4" /> Nueva Materia Prima
@@ -5613,7 +6084,7 @@ export default function BakeryDriverApp() {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
                 <input type="text" placeholder="Buscar..." value={mpSearch}
-                  onChange={e => { setMpSearch(e.target.value); setMpPage(1); fetchMateriaPrimas(1, e.target.value); }}
+                  onChange={e => { setMpSearch(e.target.value); setMpPage(1); fetchMateriaPrimas(1, e.target.value, mpBulkEditMode ? 200 : 20); }}
                   className="w-full h-10 pl-9 pr-4 rounded-xl bg-white/5 border border-white/10 text-sm text-white focus:border-brand-red outline-none" />
               </div>
               {loadingMP ? <p className="text-center text-zinc-500 py-8">Cargando...</p> : (
@@ -5623,7 +6094,36 @@ export default function BakeryDriverApp() {
                       <div className="space-y-1">
                         <p className="font-semibold text-white">{mp.nombre}</p>
                         <div className="flex flex-wrap gap-3 text-xs text-zinc-400">
-                          <span>Precio: <strong className="text-zinc-200">${mp.precio}</strong></span>
+                          {mpBulkEditMode ? (
+                            <span className="inline-flex items-center gap-1.5 bg-black/40 border border-amber-500/40 rounded-xl px-2.5 py-1">
+                              <span className="text-amber-300 font-bold">$</span>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={mpBulkPrices[mp.id] !== undefined ? mpBulkPrices[mp.id] : String(mp.precio ?? 0)}
+                                onFocus={e => e.target.select()}
+                                onChange={e => setMpBulkPrices(prev => ({ ...prev, [mp.id]: e.target.value }))}
+                                className="w-24 bg-transparent text-sm font-extrabold text-white outline-none"
+                                placeholder="0.00"
+                              />
+                              {mpBulkPrices[mp.id] !== undefined && Math.abs((parseFloat(String(mpBulkPrices[mp.id]).replace(',', '.')) || 0) - Number(mp.precio ?? 0)) > 0.001 && (
+                                <span className="text-[10px] text-emerald-400 font-semibold">(antes ${mp.precio})</span>
+                              )}
+                            </span>
+                          ) : (
+                            <span
+                              onClick={() => {
+                                setMpBulkEditMode(true);
+                                const initPrices: Record<number, string> = {};
+                                materiaPrimas.forEach((m: any) => { initPrices[m.id] = String(m.precio ?? 0); });
+                                setMpBulkPrices(initPrices);
+                              }}
+                              className="cursor-pointer hover:text-amber-300 transition-colors"
+                              title="Click para editar precios rápidamente"
+                            >
+                              Precio: <strong className="text-zinc-200 underline decoration-dotted underline-offset-2">${mp.precio}</strong>
+                            </span>
+                          )}
                           <span>Presentación: <strong className="text-zinc-200">{mp.peso} unid. base</strong></span>
                           <span>En depósito: <strong className="text-emerald-300">{mp.stock_deposito} {mp.unidad_medida}</strong></span>
                         </div>
@@ -5674,7 +6174,7 @@ export default function BakeryDriverApp() {
                   try {
                     const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(mpForm) });
                     const d = await res.json();
-                    if (d.success) { setMpModal(null); fetchMateriaPrimas(mpPage, mpSearch); } else alert(d.message || JSON.stringify(d));
+                    if (d.success) { setMpModal(null); fetchMateriaPrimas(mpPage, mpSearch); fetchRecetas(recetaSearch); fetchDeposito(); } else alert(d.message || JSON.stringify(d));
                   } catch (err: any) { alert(err?.message || 'Error al guardar'); }
                 }} className="space-y-4">
                   <div><label className="text-xs text-zinc-400 uppercase tracking-widest mb-1.5 block">Nombre</label>
@@ -5741,10 +6241,64 @@ export default function BakeryDriverApp() {
                             <span>Porciones: <strong className="text-zinc-200">{r.porciones}</strong></span>
                             <span>Ingredientes: <strong className="text-zinc-200">{r.ingredientes?.length ?? 0}</strong></span>
                             <span>Costo total: <strong className="text-brand-yellow">${r.costo_total?.toFixed(2) ?? '0.00'}</strong></span>
+                            {(() => {
+                              const porc = Math.max(0.01, Number(r.porciones || 1));
+                              const cUnit = Number(r.calculo?.costo_unitario || ((r.costo_total || 0) / porc));
+                              const pSug = Number(r.calculo?.precio_iva || r.calculo?.precio || cUnit || 0);
+                              return (
+                                <>
+                                  <span>Costo/porción: <strong className="text-zinc-200">${cUnit.toFixed(2)}</strong></span>
+                                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 font-semibold">
+                                    💡 Sugerido: <strong>${pSug.toFixed(2)}</strong>
+                                  </span>
+                                  {r.articulo_resultado && r.articulo_resultado.precio_unitario !== undefined && (
+                                    <span className="text-zinc-400">
+                                      (Precio actual Mostrador: <strong className="text-white">${Number(r.articulo_resultado.precio_unitario).toLocaleString('es-AR')}</strong>
+                                      {Number(r.articulo_resultado.precio_reparto) > 0 ? ` · Reparto: $${Number(r.articulo_resultado.precio_reparto).toLocaleString('es-AR')}` : ''})
+                                    </span>
+                                  )}
+                                </>
+                              );
+                            })()}
                             {r.articulo_resultado && <span>→ <strong className="text-emerald-300">{r.articulo_resultado.nombre}</strong></span>}
                           </div>
                         </div>
                         <div className="flex gap-2 shrink-0 flex-wrap">
+                          {(r.articulo_resultado || r.id_articulo_resultado) && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const porc = Math.max(0.01, Number(r.porciones || 1));
+                                const cUnit = Number(r.calculo?.costo_unitario || ((r.costo_total || 0) / porc));
+                                const pSug = Number(r.calculo?.precio_iva || r.calculo?.precio || cUnit || 0);
+                                const artDep = depositoArticulos.find((a: any) => String(a.id) === String(r.id_articulo_resultado));
+                                const prodList = products.find((p: any) => String(p.id) === String(r.id_articulo_resultado));
+                                const pUnitActual = r.articulo_resultado?.precio_unitario ?? prodList?.precio_unitario ?? artDep?.precio_unitario ?? 0;
+                                const pRepActual = r.articulo_resultado?.precio_reparto ?? prodList?.precio_reparto ?? artDep?.precio_reparto ?? 0;
+                                const pBarActual = r.articulo_resultado?.precio_bar ?? prodList?.precio_bar ?? artDep?.precio_bar ?? 0;
+                                setRecetaPrecioArtForm({
+                                  precio_unitario: String(pUnitActual || pSug.toFixed(2)),
+                                  precio_reparto: String(pRepActual || pSug.toFixed(2)),
+                                  precio_bar: String(pBarActual || pSug.toFixed(2)),
+                                });
+                                setRecetaActualizarPrecioModal({
+                                  recetaId: r.id,
+                                  recetaNombre: r.nombre,
+                                  articuloId: r.id_articulo_resultado || r.articulo_resultado?.id,
+                                  articuloNombre: r.articulo_resultado?.nombre || artDep?.nombre || prodList?.name || 'Artículo vinculado',
+                                  costoUnitario: cUnit,
+                                  precioSugerido: pSug,
+                                  precioActualMostrador: Number(pUnitActual || 0),
+                                  precioActualReparto: Number(pRepActual || 0),
+                                  precioActualBar: Number(pBarActual || 0),
+                                });
+                              }}
+                              className="text-xs px-3 py-1.5 bg-amber-500/15 text-amber-300 border border-amber-500/30 rounded-lg hover:bg-amber-500/25 transition-colors font-semibold"
+                              title="Ver precio sugerido y actualizar el precio de venta del artículo"
+                            >
+                              💲 Actualizar Precio
+                            </button>
+                          )}
                           <button onClick={() => { setRecetaEjecutarModal(r); setRecetaEjecutarQty(1); }}
                             className="text-xs px-3 py-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-lg hover:bg-emerald-500/20 transition-colors font-semibold">
                              –¶ Ejecutar
@@ -5763,7 +6317,15 @@ export default function BakeryDriverApp() {
                               porcentaje_ganancia: r.calculo?.porcentaje_ganancia ?? 0,
                               precio_unitario: r.calculo?.precio ?? 0,
                               iva: r.calculo?.iva ?? 0,
-                              precio_iva: r.calculo?.precio_iva ?? 0,
+                              precio_iva: r.calculo?.precio_iva ?? r.calculo?.precio ?? 0,
+                              precioManual: (() => {
+                                const cUnit = Number(r.calculo?.costo_unitario || 0);
+                                const pGan = Number(r.calculo?.porcentaje_ganancia || 0);
+                                const ivaPct = Number(r.calculo?.iva || 0);
+                                const calcIva = (cUnit * (1 + pGan / 100)) * (1 + ivaPct / 100);
+                                const savedIva = Number(r.calculo?.precio_iva || r.calculo?.precio || 0);
+                                return savedIva > 0 && Math.abs(savedIva - calcIva) > 0.1;
+                              })(),
                               ganancia: r.calculo?.ganancia ?? 0
                             });
                             setRecetaIngredientes(r.ingredientes?.map((i: any) => {
@@ -5774,6 +6336,8 @@ export default function BakeryDriverApp() {
                                 cantidad: i.cantidad, 
                                 unidad: i.unidad,
                                 precio: i.precio || mpInfo?.precio || 0,
+                                precio_original: Number(i.precio || mpInfo?.precio || 0),
+                                unidad_medida_mp: i.unidad_medida_mp || mpInfo?.unidad_medida || i.unidad || 'kg',
                                 peso: i.peso || mpInfo?.peso || 1,
                               };
                             }) ?? []);
@@ -5836,6 +6400,7 @@ export default function BakeryDriverApp() {
                   const parsedIngredientes = recetaIngredientes.map(i => ({
                     ...i,
                     cantidad: parseFloat(String(i.cantidad).replace(',', '.')) || 0,
+                    precio: parseFloat(String(i.precio).replace(',', '.')) || 0,
                   }));
 
                   if (parsedIngredientes.some(i => i.cantidad <= 0)) {
@@ -5863,7 +6428,7 @@ export default function BakeryDriverApp() {
                       }) 
                     });
                     const d = await res.json();
-                    if (d.success) { setRecetaModal(null); fetchRecetas(recetaSearch); } else alert(d.message || JSON.stringify(d));
+                    if (d.success) { setRecetaModal(null); fetchRecetas(recetaSearch); fetchMateriaPrimas(mpPage, mpSearch, mpBulkEditMode ? 200 : 20); fetchDeposito(); } else alert(d.message || JSON.stringify(d));
                   } catch (err: any) { alert(err?.message || 'Error al guardar'); }
                 }} className="space-y-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -6004,6 +6569,8 @@ export default function BakeryDriverApp() {
                                     cantidad: 1, 
                                     unidad: mp.unidad_medida || 'kg',
                                     precio: Number(mp.precio) || 0,
+                                    precio_original: Number(mp.precio) || 0,
+                                    unidad_medida_mp: mp.unidad_medida || 'kg',
                                     peso: Number(mp.peso) > 0 ? Number(mp.peso) : 1,
                                   }
                                 ]);
@@ -6038,7 +6605,7 @@ export default function BakeryDriverApp() {
                         const p = Number(ing.precio) || 0;
                         const w = Number(ing.peso) > 0 ? Number(ing.peso) : 1;
                         const unitCost = p / w;
-                        const subtotalCost = cantNum * unitCost;
+                        const subtotalCost = calcularCostoIngrediente(ing);
 
                         return (
                           <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white/5 border border-white/10 rounded-xl p-3">
@@ -6069,6 +6636,32 @@ export default function BakeryDriverApp() {
                                 />
                                 <input type="text" value={ing.unidad} onChange={e => { const upd = [...recetaIngredientes]; upd[idx].unidad = e.target.value; setRecetaIngredientes(upd); }} className="w-12 bg-transparent text-xs text-zinc-400 border-b border-white/10 outline-none focus:border-brand-red ml-1" />
                               </div>
+                              <div className="flex flex-col bg-amber-500/10 border border-amber-500/30 rounded-lg px-2 py-1" title="Editar precio de compra de esta materia prima (actualiza la MP y todas las recetas al guardar)">
+                                <span className="text-[9px] text-amber-300/90 uppercase font-bold leading-none mb-0.5">
+                                  $ MP (x{w}{ing.unidad_medida_mp || ing.unidad})
+                                </span>
+                                <div className="flex items-center gap-0.5">
+                                  <span className="text-xs text-amber-300 font-bold">$</span>
+                                  <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={ing.precio}
+                                    onFocus={e => e.target.select()}
+                                    onChange={e => {
+                                      const upd = [...recetaIngredientes];
+                                      upd[idx].precio = e.target.value;
+                                      setRecetaIngredientes(upd);
+                                    }}
+                                    placeholder="0"
+                                    className="w-20 bg-transparent text-xs text-white outline-none font-bold font-mono"
+                                  />
+                                </div>
+                                {ing.precio_original !== undefined && Math.abs((parseFloat(String(ing.precio).replace(',', '.')) || 0) - Number(ing.precio_original)) > 0.001 && (
+                                  <span className="text-[9px] text-emerald-400 font-semibold leading-none mt-0.5">
+                                    ✨ Actualiza MP
+                                  </span>
+                                )}
+                              </div>
                               <div className="w-20 text-right">
                                 <p className="text-[10px] text-zinc-500 uppercase font-mono">Subtotal</p>
                                 <p className="text-xs font-bold text-brand-yellow font-mono">
@@ -6091,7 +6684,7 @@ export default function BakeryDriverApp() {
                         const cantNum = parseFloat(String(ing.cantidad).replace(',', '.')) || 0;
                         const p = Number(ing.precio) || 0;
                         const w = Number(ing.peso) > 0 ? Number(ing.peso) : 1;
-                        return acc + (cantNum * (p / w));
+                        return acc + calcularCostoIngrediente(ing);
                       }, 0);
                       const porcionesNum = parseFloat(String(recetaForm.porciones).replace(',', '.')) || 1;
                       const costoPorPorcion = totalCosto / Math.max(0.01, porcionesNum);
@@ -6126,16 +6719,140 @@ export default function BakeryDriverApp() {
                         <input type="text" inputMode="decimal" value={recetaForm.costo_unitario} onChange={e => setRecetaForm({...recetaForm, costo_unitario: e.target.value})} className="w-full h-10 rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white outline-none focus:border-brand-red" />
                       </div>
                       <div><label className="text-xs text-zinc-400 block mb-1">% Ganancia</label>
-                        <input type="text" inputMode="decimal" value={recetaForm.porcentaje_ganancia} onChange={e => setRecetaForm({...recetaForm, porcentaje_ganancia: e.target.value})} className="w-full h-10 rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white outline-none focus:border-brand-red" />
+                        <input type="text" inputMode="decimal" value={recetaForm.porcentaje_ganancia} onChange={e => {
+                          const val = e.target.value;
+                          const cUnit = parseFloat(String(recetaForm.costo_unitario).replace(',', '.')) || 0;
+                          const pGan = parseFloat(String(val).replace(',', '.')) || 0;
+                          const gan = cUnit * (pGan / 100);
+                          const pNeto = cUnit + gan;
+                          const ivaPct = parseFloat(String(recetaForm.iva).replace(',', '.')) || 0;
+                          const pIva = pNeto * (1 + ivaPct / 100);
+                          setRecetaForm({
+                            ...recetaForm,
+                            porcentaje_ganancia: val,
+                            ganancia: gan.toFixed(2),
+                            precio_unitario: pNeto.toFixed(2),
+                            precio_iva: pIva.toFixed(2),
+                            precioManual: false,
+                          });
+                        }} className="w-full h-10 rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white outline-none focus:border-brand-red" />
                       </div>
                       <div><label className="text-xs text-zinc-400 block mb-1">Precio Neto</label>
-                        <input type="text" inputMode="decimal" value={recetaForm.precio_unitario} onChange={e => setRecetaForm({...recetaForm, precio_unitario: e.target.value})} className="w-full h-10 rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white outline-none focus:border-brand-red" />
+                        <input type="text" inputMode="decimal" value={recetaForm.precio_unitario} onChange={e => {
+                          const val = e.target.value;
+                          const pNeto = parseFloat(String(val).replace(',', '.')) || 0;
+                          const cUnit = parseFloat(String(recetaForm.costo_unitario).replace(',', '.')) || 0;
+                          const ivaPct = parseFloat(String(recetaForm.iva).replace(',', '.')) || 0;
+                          const pIva = pNeto * (1 + ivaPct / 100);
+                          const gan = pNeto - cUnit;
+                          setRecetaForm({
+                            ...recetaForm,
+                            precio_unitario: val,
+                            precio_iva: pIva.toFixed(2),
+                            ganancia: gan.toFixed(2),
+                            precioManual: true,
+                          });
+                        }} className="w-full h-10 rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white outline-none focus:border-brand-red" />
                       </div>
                       <div><label className="text-xs text-zinc-400 block mb-1">% IVA</label>
-                        <input type="text" inputMode="decimal" value={recetaForm.iva} onChange={e => setRecetaForm({...recetaForm, iva: e.target.value})} className="w-full h-10 rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white outline-none focus:border-brand-red" />
+                        <input type="text" inputMode="decimal" value={recetaForm.iva} onChange={e => {
+                          const val = e.target.value;
+                          const ivaPct = parseFloat(String(val).replace(',', '.')) || 0;
+                          const pNeto = parseFloat(String(recetaForm.precio_unitario).replace(',', '.')) || 0;
+                          const pIva = pNeto * (1 + ivaPct / 100);
+                          setRecetaForm({
+                            ...recetaForm,
+                            iva: val,
+                            precio_iva: pIva.toFixed(2),
+                          });
+                        }} className="w-full h-10 rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white outline-none focus:border-brand-red" />
                       </div>
                       <div className="col-span-2 sm:col-span-3"><label className="text-xs text-emerald-400 font-bold block mb-1">Precio Final (con IVA)</label>
-                        <input type="text" inputMode="decimal" value={recetaForm.precio_iva} onChange={e => setRecetaForm({...recetaForm, precio_iva: e.target.value})} className="w-full h-11 rounded-xl bg-emerald-500/10 border border-emerald-500/20 px-4 font-bold text-lg text-emerald-400 outline-none focus:border-emerald-400" />
+                        <input type="text" inputMode="decimal" value={recetaForm.precio_iva} onChange={e => {
+                          const val = e.target.value;
+                          const pIva = parseFloat(String(val).replace(',', '.')) || 0;
+                          const ivaPct = parseFloat(String(recetaForm.iva).replace(',', '.')) || 0;
+                          const cUnit = parseFloat(String(recetaForm.costo_unitario).replace(',', '.')) || 0;
+                          const pNeto = ivaPct > 0 ? (pIva / (1 + ivaPct / 100)) : pIva;
+                          const gan = pNeto - cUnit;
+                          setRecetaForm({
+                            ...recetaForm,
+                            precio_iva: val,
+                            precio_unitario: pNeto.toFixed(2),
+                            ganancia: gan.toFixed(2),
+                            precioManual: true,
+                          });
+                        }} className="w-full h-11 rounded-xl bg-emerald-500/10 border border-emerald-500/20 px-4 font-bold text-lg text-emerald-400 outline-none focus:border-emerald-400" />
+                        {recetaForm.precio_sugerido_calc && Math.abs((parseFloat(String(recetaForm.precio_iva).replace(',', '.')) || 0) - (parseFloat(String(recetaForm.precio_sugerido_calc).replace(',', '.')) || 0)) > 0.05 && (
+                          <div className="flex items-center justify-between text-[11px] text-zinc-400 mt-1 px-1">
+                            <span>💡 Precio calculado por {recetaForm.porcentaje_ganancia || 0}% de ganancia: <strong className="text-emerald-300">${recetaForm.precio_sugerido_calc}</strong></span>
+                            <button
+                              type="button"
+                              onClick={() => setRecetaForm((prev: any) => ({
+                                ...prev,
+                                precio_iva: prev.precio_sugerido_calc,
+                                precio_unitario: prev.precio_sugerido_calc,
+                                precioManual: false,
+                              }))}
+                              className="text-emerald-400 hover:underline font-semibold"
+                            >
+                              Restaurar sugerido (${recetaForm.precio_sugerido_calc})
+                            </button>
+                          </div>
+                        )}
+                        {recetaForm.id_articulo_resultado && (() => {
+                          const artDep = depositoArticulos.find((a: any) => String(a.id) === String(recetaForm.id_articulo_resultado));
+                          const prodList = products.find((p: any) => String(p.id) === String(recetaForm.id_articulo_resultado));
+                          const artNombre = artDep?.nombre || prodList?.name || recetaEditing?.articulo_resultado?.nombre || 'Artículo vinculado';
+                          const pUnitActual = recetaEditing?.articulo_resultado?.precio_unitario ?? prodList?.precio_unitario ?? artDep?.precio_unitario ?? 0;
+                          const pRepActual = recetaEditing?.articulo_resultado?.precio_reparto ?? prodList?.precio_reparto ?? artDep?.precio_reparto ?? 0;
+                          const pBarActual = recetaEditing?.articulo_resultado?.precio_bar ?? prodList?.precio_bar ?? artDep?.precio_bar ?? 0;
+                          const pSug = parseFloat(String(recetaForm.precio_iva || recetaForm.precio_unitario || 0).replace(',', '.')) || 0;
+                          const cUnit = parseFloat(String(recetaForm.costo_unitario || 0).replace(',', '.')) || 0;
+
+                          return (
+                            <div className="mt-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                              <div className="space-y-0.5">
+                                <p className="text-xs font-bold text-amber-300">
+                                  🏷️ Artículo de venta vinculado: <span className="text-white">{artNombre}</span>
+                                </p>
+                                <p className="text-[11px] text-zinc-300">
+                                  Precio actual Mostrador: <strong className="text-white">${Number(pUnitActual).toLocaleString('es-AR')}</strong>
+                                  {Number(pRepActual) > 0 ? ` · Reparto: $${Number(pRepActual).toLocaleString('es-AR')}` : ''}
+                                  {' · '}Sugerido por receta: <strong className="text-emerald-400">${pSug.toFixed(2)}</strong>
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!recetaEditing?.id) {
+                                    alert('Guardá primero la nueva receta para poder actualizar el precio del artículo.');
+                                    return;
+                                  }
+                                  setRecetaPrecioArtForm({
+                                    precio_unitario: String(pSug > 0 ? pSug.toFixed(2) : pUnitActual),
+                                    precio_reparto: String(pRepActual || (pSug > 0 ? pSug.toFixed(2) : 0)),
+                                    precio_bar: String(pBarActual || (pSug > 0 ? pSug.toFixed(2) : 0)),
+                                  });
+                                  setRecetaActualizarPrecioModal({
+                                    recetaId: recetaEditing.id,
+                                    recetaNombre: recetaForm.nombre || recetaEditing.nombre,
+                                    articuloId: recetaForm.id_articulo_resultado,
+                                    articuloNombre: artNombre,
+                                    costoUnitario: cUnit,
+                                    precioSugerido: pSug,
+                                    precioActualMostrador: Number(pUnitActual || 0),
+                                    precioActualReparto: Number(pRepActual || 0),
+                                    precioActualBar: Number(pBarActual || 0),
+                                  });
+                                }}
+                                className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-extrabold text-xs transition-all shrink-0 shadow-md shadow-amber-500/20 cursor-pointer"
+                              >
+                                💲 Actualizar Precio del Artículo
+                              </button>
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                   </div>
@@ -6146,6 +6863,178 @@ export default function BakeryDriverApp() {
           )}
 
           {/* Modal Ejecutar Receta */}
+          {/* Modal Actualizar Precio del Artículo desde Receta */}
+          {recetaActualizarPrecioModal && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+              <div className="w-full max-w-md bg-zinc-900 border border-white/10 rounded-3xl p-6 space-y-4 shadow-2xl">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-widest text-amber-400 font-bold">Desde Receta: {recetaActualizarPrecioModal.recetaNombre}</p>
+                    <h2 className="font-bold text-lg text-white">💲 Actualizar Precio de Venta</h2>
+                  </div>
+                  <button onClick={() => setRecetaActualizarPrecioModal(null)} className="text-zinc-400 hover:text-white"><X className="w-5 h-5" /></button>
+                </div>
+
+                <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3.5 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-zinc-300">Artículo vinculado:</span>
+                    <strong className="text-white text-sm">{recetaActualizarPrecioModal.articuloNombre}</strong>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-zinc-400">Costo por porción según receta:</span>
+                    <span className="font-mono font-bold text-zinc-200">${Number(recetaActualizarPrecioModal.costoUnitario || 0).toFixed(2)}</span>
+                  </div>
+                  <div className="flex items-center justify-between pt-1.5 border-t border-white/10">
+                    <span className="text-xs font-bold text-emerald-300">💡 Precio Sugerido por Receta:</span>
+                    <span className="text-lg font-black text-emerald-400 font-mono">
+                      ${Number(recetaActualizarPrecioModal.precioSugerido || 0).toFixed(2)}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const sug = String(Math.round(Number(recetaActualizarPrecioModal.precioSugerido || 0) * 100) / 100);
+                      setRecetaPrecioArtForm({
+                        precio_unitario: sug,
+                        precio_reparto: sug,
+                        precio_bar: sug,
+                      });
+                    }}
+                    className="w-full py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    ⚡ Copiar Precio Sugerido (${Number(recetaActualizarPrecioModal.precioSugerido || 0).toFixed(2)}) a las 3 listas
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-semibold text-zinc-300">
+                        🥖 Precio Mostrador (Actual: ${Number(recetaActualizarPrecioModal.precioActualMostrador || 0).toLocaleString('es-AR')})
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setRecetaPrecioArtForm(prev => ({ ...prev, precio_unitario: String(Number(recetaActualizarPrecioModal.precioSugerido || 0).toFixed(2)) }))}
+                        className="text-[11px] text-amber-400 hover:underline font-semibold"
+                      >
+                        Usar sugerido
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400 font-bold">$</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={recetaPrecioArtForm.precio_unitario}
+                        onFocus={e => e.target.select()}
+                        onChange={e => setRecetaPrecioArtForm(prev => ({ ...prev, precio_unitario: e.target.value }))}
+                        className="w-full h-11 rounded-xl bg-black/40 border border-white/10 pl-8 pr-4 text-sm font-bold text-white outline-none focus:border-amber-400"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-semibold text-zinc-300">
+                        🚚 Precio Reparto (Actual: ${Number(recetaActualizarPrecioModal.precioActualReparto || 0).toLocaleString('es-AR')})
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setRecetaPrecioArtForm(prev => ({ ...prev, precio_reparto: String(Number(recetaActualizarPrecioModal.precioSugerido || 0).toFixed(2)) }))}
+                        className="text-[11px] text-amber-400 hover:underline font-semibold"
+                      >
+                        Usar sugerido
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400 font-bold">$</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={recetaPrecioArtForm.precio_reparto}
+                        onFocus={e => e.target.select()}
+                        onChange={e => setRecetaPrecioArtForm(prev => ({ ...prev, precio_reparto: e.target.value }))}
+                        className="w-full h-11 rounded-xl bg-black/40 border border-white/10 pl-8 pr-4 text-sm font-bold text-white outline-none focus:border-amber-400"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-semibold text-zinc-300">
+                        📋 Precio Cta. Cte. / Bar (Actual: ${Number(recetaActualizarPrecioModal.precioActualBar || 0).toLocaleString('es-AR')})
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setRecetaPrecioArtForm(prev => ({ ...prev, precio_bar: String(Number(recetaActualizarPrecioModal.precioSugerido || 0).toFixed(2)) }))}
+                        className="text-[11px] text-amber-400 hover:underline font-semibold"
+                      >
+                        Usar sugerido
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400 font-bold">$</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={recetaPrecioArtForm.precio_bar}
+                        onFocus={e => e.target.select()}
+                        onChange={e => setRecetaPrecioArtForm(prev => ({ ...prev, precio_bar: e.target.value }))}
+                        className="w-full h-11 rounded-xl bg-black/40 border border-white/10 pl-8 pr-4 text-sm font-bold text-white outline-none focus:border-amber-400"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setRecetaActualizarPrecioModal(null)}
+                    className="flex-1 h-11 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 text-sm font-semibold transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={savingPrecioArt}
+                    onClick={async () => {
+                      setSavingPrecioArt(true);
+                      try {
+                        const res = await fetch(`${API_URL}/admin/recetas/${recetaActualizarPrecioModal.recetaId}/actualizar-precio-articulo`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                          body: JSON.stringify({
+                            id_articulo: recetaActualizarPrecioModal.articuloId,
+                            precio_unitario: parseFloat(String(recetaPrecioArtForm.precio_unitario).replace(',', '.')) || 0,
+                            precio_reparto: parseFloat(String(recetaPrecioArtForm.precio_reparto).replace(',', '.')) || 0,
+                            precio_bar: parseFloat(String(recetaPrecioArtForm.precio_bar).replace(',', '.')) || 0,
+                          }),
+                        });
+                        const data = await res.json();
+                        if (res.ok && data.success) {
+                          alert(`✅ ${data.message}`);
+                          setRecetaActualizarPrecioModal(null);
+                          fetchRecetas(recetaSearch);
+                          fetchDeposito();
+                          if (token) fetchAllData(token, false);
+                        } else {
+                          alert(data.message || 'Error al actualizar el precio del artículo');
+                        }
+                      } catch {
+                        alert('Error de conexión al actualizar precio');
+                      } finally {
+                        setSavingPrecioArt(false);
+                      }
+                    }}
+                    className="flex-1 h-11 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-950 font-extrabold text-sm transition-all shadow-lg shadow-amber-500/20 cursor-pointer"
+                  >
+                    {savingPrecioArt ? 'Guardando...' : '💾 Guardar Precios'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {recetaEjecutarModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
               <div className="w-full max-w-md bg-zinc-900 border border-white/10 rounded-3xl p-6 space-y-4">
@@ -6617,13 +7506,13 @@ export default function BakeryDriverApp() {
                                 <p className="text-zinc-400">En Depósito</p>
                                 <div className="text-center pt-1"><InlineStockEdit id={a.id} initialStock={a.stock_deposito} onSave={handleInlineAjuste} /></div>
                               </div>
-                              <div className="bg-red-500/10 rounded-xl p-2">
+                              <div onClick={() => { if (a.total_reservado > 0) setDepositoSubTab('reservas'); }} className={`bg-red-500/10 rounded-xl p-2 ${a.total_reservado > 0 ? 'cursor-pointer hover:bg-red-500/20 transition-colors border border-red-500/20' : ''}`} title={a.total_reservado > 0 ? 'Clic para ir a despachar reservas' : ''}>
                                 <p className="text-red-400">Reservado</p>
                                 <p className="font-bold text-red-300 text-lg">{a.total_reservado}</p>
                                 {(Object.keys(a.stock_repartidores || {}).length > 0) && (
                                   <div className="text-[10px] text-zinc-500 mt-0.5 space-y-0.5">
                                     {Object.entries(a.stock_repartidores || {}).map(([id, rep]: [string, any]) => 
-                                      rep.cantidad_reservada > 0 ? <p key={id}>Rep {id}: {rep.cantidad_reservada}</p> : null
+                                      rep.cantidad_reservada > 0 ? <p key={id} className="text-red-300/90 font-medium">{repartidores.find(r => String(r.id) === String(id))?.name || `Rep ${id}`}: {rep.cantidad_reservada}</p> : null
                                     )}
                                   </div>
                                 )}
@@ -6637,7 +7526,7 @@ export default function BakeryDriverApp() {
                               <span className="flex items-center gap-1.5"><Building2 className="w-3 h-3 text-amber-400 shrink-0" /><span>Panadería: <strong className="text-zinc-300">{a.stock_panaderia}</strong></span></span>
                               <div className="flex gap-2 flex-wrap">
                                 {Object.entries(a.stock_repartidores || {}).map(([id, rep]: [string, any]) => 
-                                  <span key={id} className="flex items-center gap-1"><Truck className="w-3 h-3 text-blue-400 shrink-0" /><span>Rep {id}: <strong className="text-zinc-300">{rep.cantidad}</strong></span></span>
+                                  <span key={id} className="flex items-center gap-1"><Truck className="w-3 h-3 text-blue-400 shrink-0" /><span>{repartidores.find(r => String(r.id) === String(id))?.name || `Rep ${id}`}: <strong className="text-zinc-300">{rep.cantidad}</strong></span></span>
                                 )}
                               </div>
                             </div>
@@ -6743,7 +7632,8 @@ export default function BakeryDriverApp() {
               )}
 
               {/* ── Sub-tab: Reservas Pendientes ── */}
-              {!loadingDeposito && depositoSubTab === 'reservas' && (
+              {!loadingDeposito && depositoSubTab === 'reservas' && renderDepositoReservasTab()}
+              {false && !loadingDeposito && depositoSubTab === 'reservas' && (
                 <div className="space-y-3">
                   {depositoReservasPendientes.length === 0 ? (
                     <p className="text-center text-zinc-500 text-sm py-8">No hay reservas pendientes de aprobación.</p>
@@ -7068,11 +7958,11 @@ export default function BakeryDriverApp() {
                     className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${historyTab === 'estadisticas' ? 'bg-brand-red/20 text-brand-yellow' : 'text-zinc-500 hover:text-zinc-300'}`}>
                     <PieChartIcon className="w-4 h-4" /> Estadísticas
                   </button>
-                  <button onClick={() => { setHistoryTab('cierres'); fetchCierres(); }}
+                  <button onClick={() => setHistoryTab('cierres')}
                     className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${historyTab === 'cierres' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'text-zinc-500 hover:text-zinc-300'}`}>
                     <Archive className="w-4 h-4" /> Cierres de Caja
                   </button>
-                  <button onClick={() => { setHistoryTab('tesoreria'); fetchTesoreria(); }}
+                  <button onClick={() => setHistoryTab('tesoreria')}
                     className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${historyTab === 'tesoreria' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'text-zinc-500 hover:text-zinc-300'}`}>
                     <Building2 className="w-4 h-4" /> Tesorería (Caja Mayor)
                   </button>
@@ -8175,7 +9065,7 @@ export default function BakeryDriverApp() {
             fetchProveedores();
             fetchAllData(token!, false);
             fetchCajaTurno();
-            setHistoryRefresh(prev => prev + 1);
+            if (activeTabRef.current === 'ventas') setHistoryRefresh(prev => prev + 1);
           }}
         />
       )}
